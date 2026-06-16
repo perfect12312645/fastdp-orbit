@@ -1,0 +1,18 @@
+[Unit]
+Description=Orbit Agent service
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/fastdp-orbit
+ExecStart=/opt/fastdp-orbit/orbit-agent --config /etc/fastdp-orbit/agent.toml
+Restart=on-failure
+RestartSec=3
+StartLimitBurst=5
+StartLimitInterval=60
+SuccessExitStatus=0 100
+
+PrivateTmp=false
+
+[Install]
+WantedBy=multi-user.target

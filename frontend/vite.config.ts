@@ -9,13 +9,11 @@ export default defineConfig({
       '@': resolve(__dirname, 'src'),
     },
   },
+  build: {
+    outDir: resolve(__dirname, '../backend/dist'),
+    emptyOutDir: true,
+  },
   server: {
     port: 3000,
-    proxy: {
-      '/api': {
-        target: 'http://localhost:8080',
-        changeOrigin: true,
-      },
-    },
   },
 })

@@ -5,32 +5,28 @@
         <h2>节点管理</h2>
         <p class="page-subtitle">管理集群中的所有计算节点</p>
       </div>
-      <el-button type="primary" @click="handleAdd">
-        <Icon icon="mdi:plus" :size="16" /> 添加节点
-      </el-button>
+      <div class="header-actions">
+        <el-button type="success" @click="handleGetInstallCommand">
+          <Icon icon="mdi:terminal" :size="16" /> 获取安装命令
+        </el-button>
+        <el-button type="warning" :loading="syncLoading" @click="handleSyncHardware">
+          <Icon icon="mdi:sync" :size="16" /> 同步硬件信息
+        </el-button>
+        <el-button @click="loadData" :loading="loading">
+          <Icon icon="mdi:refresh" :size="16" /> 刷新
+        </el-button>
+      </div>
     </div>
 
     <div class="page-content">
-      <!-- 搜索与工具栏 -->
+      <!-- 搜索工具栏 -->
       <div class="table-toolbar">
         <div class="table-toolbar-left">
           <el-input
-            v-model="queryForm.name"
-            placeholder="搜索节点名称"
+            v-model="searchText"
+            placeholder="搜索主机名或IP"
             clearable
-            style="width: 200px;"
-            @clear="handleSearch"
-            @keyup.enter="handleSearch"
-          >
-            <template #prefix>
-              <Icon icon="mdi:magnify" :size="16" />
-            </template>
-          </el-input>
-          <el-input
-            v-model="queryForm.ip"
-            placeholder="搜索IP地址"
-            clearable
-            style="width: 200px;"
+            style="width: 240px;"
             @clear="handleSearch"
             @keyup.enter="handleSearch"
           >
@@ -39,339 +35,322 @@
             </template>
           </el-input>
           <el-select
-            v-model="queryForm.status"
+            v-model="statusFilter"
             placeholder="节点状态"
             clearable
-            style="width: 140px;"
+            style="width: 130px;"
             @change="handleSearch"
           >
             <el-option label="在线" value="online" />
             <el-option label="离线" value="offline" />
-            <el-option label="维护中" value="maintenance" />
-            <el-option label="异常" value="error" />
           </el-select>
-          <el-button type="primary" @click="handleSearch">
-            <Icon icon="mdi:magnify" :size="16" /> 搜索
-          </el-button>
-          <el-button @click="handleReset">
-            <Icon icon="mdi:refresh" :size="16" /> 重置
-          </el-button>
         </div>
         <div class="table-toolbar-right">
-          <el-button
-            type="danger"
-            :disabled="selectedIds.length === 0"
-            @click="handleBatchDelete"
-          >
-            <Icon icon="mdi:delete-outline" :size="16" /> 批量删除
-          </el-button>
-          <el-button @click="handleExport">
-            <Icon icon="mdi:download-outline" :size="16" /> 导出
-          </el-button>
+          <span class="total-text">共 {{ filteredData.length }} 台节点</span>
         </div>
       </div>
 
       <!-- 数据表格 -->
       <el-table
         v-loading="loading"
-        :data="tableData"
+        :data="paginatedData"
         border
         stripe
-        @selection-change="handleSelectionChange"
-        @sort-change="handleSortChange"
         style="width: 100%"
-        row-key="id"
+        row-key="ip"
       >
-        <el-table-column type="selection" width="50" align="center" />
-        <el-table-column prop="name" label="节点名称" min-width="140" sortable="custom" show-overflow-tooltip>
+        <el-table-column prop="hostname" label="主机名" min-width="130">
           <template #default="{ row }">
-            <div class="node-name">
-              <Icon icon="mdi:server-network-outline" :size="16" class="node-icon" />
-              {{ row.name }}
+            <div class="node-name clickable" @click="showDetail(row)">
+              <span class="status-dot" :class="row.status === 'online' ? 'status-online' : 'status-offline'"></span>
+              {{ row.hostname }}
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="ip" label="IP地址" min-width="140" sortable="custom" show-overflow-tooltip>
+        <el-table-column prop="ip" label="IP地址" min-width="140">
           <template #default="{ row }">
             <code class="ip-code">{{ row.ip }}</code>
           </template>
         </el-table-column>
-        <el-table-column prop="os" label="操作系统" min-width="120" show-overflow-tooltip />
-        <el-table-column prop="cpuCores" label="CPU核心数" width="110" align="center" sortable="custom" />
-        <el-table-column prop="memoryMb" label="内存大小" width="110" align="center" sortable="custom">
-          <template #default="{ row }">{{ formatMemory(row.memoryMb) }}</template>
+        <el-table-column label="操作系统" min-width="150" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.os_name }} {{ row.os_version }}</template>
         </el-table-column>
-        <el-table-column prop="diskGb" label="磁盘大小" width="110" align="center" sortable="custom">
-          <template #default="{ row }">{{ row.diskGb ? `${row.diskGb} GB` : '-' }}</template>
-        </el-table-column>
-        <el-table-column prop="gpuCount" label="GPU数量" width="100" align="center" sortable="custom">
+        <el-table-column label="CPU" min-width="160" show-overflow-tooltip>
           <template #default="{ row }">
-            <el-tag type="primary" effect="plain" size="small" round>
-              <Icon icon="mdi:chip-outline" :size="12" /> {{ row.gpuCount }}
-            </el-tag>
+            <span>{{ row.cpu_model }}</span>
+            <span class="core-badge">{{ row.cpu_cores }}核</span>
           </template>
         </el-table-column>
-        <el-table-column prop="status" label="状态" width="100" align="center">
+        <el-table-column label="内存" width="100" align="center">
+          <template #default="{ row }">{{ formatMemoryKB(row.memory_kb) }}</template>
+        </el-table-column>
+        <el-table-column label="磁盘" width="100" align="center">
+          <template #default="{ row }">{{ formatDiskTotal(row.disks) }}</template>
+        </el-table-column>
+        <el-table-column label="GPU" width="80" align="center">
           <template #default="{ row }">
-            <el-tag :type="getNodeStatusType(row.status)" size="small" effect="light" round>
-              <span class="status-dot" :class="getNodeStatusType(row.status)"></span>
-              {{ getNodeStatusLabel(row.status) }}
-            </el-tag>
+            <template v-if="row.gpus && row.gpus.length > 0">
+              <el-tag type="primary" effect="plain" size="small">
+                {{ row.gpus.length }}
+              </el-tag>
+            </template>
+            <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="updatedAt" label="最后更新时间" width="180" sortable="custom">
-          <template #default="{ row }">{{ formatDateTime(row.updatedAt) }}</template>
+        <el-table-column label="运行时间" width="120" align="center">
+          <template #default="{ row }">{{ formatUptime(row.uptime_seconds) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="160" fixed="right" align="center">
+        <el-table-column label="状态" width="80" align="center">
           <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="handleEdit(row)">
-              <Icon icon="mdi:pencil-outline" :size="14" /> 编辑
-            </el-button>
-            <el-button type="primary" link size="small" @click="handleDetail(row)">
-              <Icon icon="mdi:eye-outline" :size="14" /> 详情
-            </el-button>
-            <el-popconfirm
-              title="确定要删除该节点吗？"
-              confirm-button-text="确定"
-              cancel-button-text="取消"
-              @confirm="handleDelete(row)"
+            <el-tag
+              :type="row.status === 'online' ? 'success' : 'danger'"
+              size="small"
+              effect="light"
+              round
             >
-              <template #reference>
-                <el-button type="danger" link size="small">
-                  <Icon icon="mdi:delete-outline" :size="14" /> 删除
-                </el-button>
-              </template>
-            </el-popconfirm>
+              {{ row.status === 'online' ? '在线' : '离线' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="80" align="center" fixed="right">
+          <template #default="{ row }">
+            <el-button type="danger" link size="small" @click="handleDelete(row)">
+              <Icon icon="mdi:delete-outline" :size="14" /> 删除
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
 
+      <!-- 前端分页 -->
       <div class="pagination-wrapper">
         <el-pagination
-          v-model:current-page="queryForm.page"
-          v-model:page-size="queryForm.pageSize"
-          :page-sizes="PaginationConfig.pageSizes"
-          :total="total"
-          layout="total, sizes, prev, pager, next, jumper"
-          @size-change="handleSearch"
-          @current-change="handleSearch"
+          v-model:current-page="currentPage"
+          v-model:page-size="pageSize"
+          :page-sizes="[10, 20, 50]"
+          :total="filteredData.length"
+          layout="total, sizes, prev, pager, next"
+          @size-change="currentPage = 1"
         />
       </div>
     </div>
 
-    <!-- 新增/编辑弹窗 -->
+    <!-- 安装命令弹窗 -->
     <el-dialog
-      v-model="dialogVisible"
-      :title="dialogType === 'add' ? '添加节点' : '编辑节点'"
+      v-model="installDialogVisible"
+      title="Agent 安装命令"
       width="600px"
       destroy-on-close
-      @close="resetForm"
     >
-      <el-form
-        ref="formRef"
-        :model="formData"
-        :rules="formRules"
-        label-width="100px"
-        label-position="right"
-      >
-        <el-form-item label="节点名称" prop="name">
-          <el-input v-model="formData.name" placeholder="请输入节点名称" />
-        </el-form-item>
-        <el-form-item label="IP地址" prop="ip">
-          <el-input v-model="formData.ip" placeholder="请输入IP地址" />
-        </el-form-item>
-        <el-form-item label="操作系统" prop="os">
-          <el-input v-model="formData.os" placeholder="如 Ubuntu 22.04" />
-        </el-form-item>
-        <el-form-item label="CPU核心数" prop="cpuCores">
-          <el-input-number v-model="formData.cpuCores" :min="1" :max="1024" style="width: 100%;" />
-        </el-form-item>
-        <el-form-item label="内存(MB)" prop="memoryMb">
-          <el-input-number v-model="formData.memoryMb" :min="1" :max="1048576" style="width: 100%;" />
-        </el-form-item>
-        <el-form-item label="磁盘(GB)" prop="diskGb">
-          <el-input-number v-model="formData.diskGb" :min="1" :max="10485760" style="width: 100%;" />
-        </el-form-item>
-        <el-form-item label="所属集群" prop="clusterName">
-          <el-input v-model="formData.clusterName" placeholder="请输入集群名称" />
-        </el-form-item>
-      </el-form>
+      <div class="install-command-content">
+        <p class="install-tip">在目标服务器上执行以下命令安装 Agent：</p>
+        <el-input
+          v-model="installCommand"
+          type="textarea"
+          :rows="4"
+          readonly
+          class="install-command-input"
+        />
+        <div class="install-actions">
+          <el-button type="primary" @click="copyInstallCommand">
+            <Icon icon="mdi:content-copy" :size="16" /> 复制命令
+          </el-button>
+        </div>
+        <el-divider />
+        <p class="install-note">
+          <Icon icon="mdi:information-outline" :size="14" />
+          注意：请确保目标服务器可以访问 Server 的 HTTP 端口
+        </p>
+      </div>
       <template #footer>
-        <el-button @click="dialogVisible = false">取 消</el-button>
-        <el-button type="primary" :loading="submitLoading" @click="handleSubmit">确 定</el-button>
+        <el-button @click="installDialogVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 节点详情弹框 -->
+    <el-dialog
+      v-model="detailVisible"
+      :title="detailMachine ? `${detailMachine.hostname} 详细信息` : '节点详情'"
+      width="680px"
+      destroy-on-close
+    >
+      <template v-if="detailMachine">
+        <div class="detail-grid">
+          <div class="detail-section">
+            <h4>基本信息</h4>
+            <div class="detail-item"><span class="label">主机名</span><span>{{ detailMachine.hostname }}</span></div>
+            <div class="detail-item"><span class="label">IP地址</span><code class="ip-code">{{ detailMachine.ip }}:{{ detailMachine.port }}</code></div>
+            <div class="detail-item"><span class="label">虚拟化</span><span>{{ detailMachine.virtualization || '-' }}</span></div>
+            <div class="detail-item"><span class="label">时区</span><span>{{ detailMachine.timezone }}</span></div>
+            <div class="detail-item"><span class="label">网关</span><span>{{ detailMachine.gateway }}</span></div>
+          </div>
+          <div class="detail-section">
+            <h4>系统信息</h4>
+            <div class="detail-item"><span class="label">操作系统</span><span>{{ detailMachine.os_name }} {{ detailMachine.os_version }}</span></div>
+            <div class="detail-item"><span class="label">内核</span><span>{{ detailMachine.kernel }}</span></div>
+            <div class="detail-item"><span class="label">架构</span><span>{{ detailMachine.arch }}</span></div>
+            <div class="detail-item"><span class="label">系统时间</span><span>{{ detailMachine.system_time }}</span></div>
+            <div class="detail-item"><span class="label">硬件时间</span><span>{{ detailMachine.hardware_time }}</span></div>
+            <div class="detail-item"><span class="label">运行时间</span><span>{{ formatUptime(detailMachine.uptime_seconds) }}</span></div>
+          </div>
+          <div class="detail-section">
+            <h4>硬件信息</h4>
+            <div class="detail-item"><span class="label">CPU</span><span>{{ detailMachine.cpu_model }} ({{ detailMachine.cpu_cores }}核)</span></div>
+            <div class="detail-item"><span class="label">内存</span><span>{{ formatMemoryKB(detailMachine.memory_kb) }}</span></div>
+            <div class="detail-item"><span class="label">交换分区</span><span>{{ formatMemoryKB(detailMachine.swap_kb) }}</span></div>
+            <div class="detail-item"><span class="label">防火墙</span><span>{{ detailMachine.firewall_status }} ({{ detailMachine.firewall_enabled }})</span></div>
+          </div>
+          <div class="detail-section" v-if="detailMachine.disks && detailMachine.disks.length > 0">
+            <h4>磁盘</h4>
+            <div v-for="disk in detailMachine.disks" :key="disk.device" class="detail-item">
+              <span class="label">{{ disk.device }}</span>
+              <span>{{ disk.type }} - {{ disk.total_gb }} GB</span>
+            </div>
+          </div>
+          <div class="detail-section" v-if="detailMachine.networks && detailMachine.networks.length > 0">
+            <h4>网络</h4>
+            <div v-for="net in detailMachine.networks" :key="net.name" class="detail-item">
+              <span class="label">{{ net.name }}</span>
+              <span>{{ net.ip }} ({{ net.mac }}) - {{ net.status }}</span>
+            </div>
+          </div>
+          <div class="detail-section" v-if="detailMachine.gpus && detailMachine.gpus.length > 0">
+            <h4>GPU</h4>
+            <div v-for="gpu in detailMachine.gpus" :key="gpu.name" class="detail-item">
+              <span class="label">{{ gpu.name }}</span>
+              <span>驱动: {{ gpu.driver_version }} x{{ gpu.count }}</span>
+            </div>
+          </div>
+        </div>
+      </template>
+      <template #footer>
+        <el-button @click="detailVisible = false">关闭</el-button>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { Icon } from '@iconify/vue'
-import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
-import { getNodeListApi, createNodeApi, updateNodeApi, deleteNodeApi, batchDeleteNodeApi } from '@/api/node'
-import type { NodeInfo, NodeFormData } from '@/api/types'
-import { PaginationConfig, NodeStatusLabel, NodeStatusType } from '@/constants'
-import { formatDateTime, formatMemory } from '@/utils/format'
-import { exportToExcel } from '@/utils/export'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { getMachinesApi, syncHardwareApi, deleteMachineApi, type MachineInfo } from '@/api/machine'
+import { getInstallCommandApi } from '@/api/install'
 
-function getNodeStatusLabel(status: string) {
-  return NodeStatusLabel[status as keyof typeof NodeStatusLabel] || status
-}
-
-function getNodeStatusType(status: string) {
-  return NodeStatusType[status as keyof typeof NodeStatusType] || 'info'
-}
-
-const queryForm = reactive({
-  page: PaginationConfig.defaultPage,
-  pageSize: PaginationConfig.defaultPageSize,
-  name: '',
-  ip: '',
-  status: '',
-})
-
-const tableData = ref<NodeInfo[]>([])
-const total = ref(0)
 const loading = ref(false)
-const selectedIds = ref<number[]>([])
+const syncLoading = ref(false)
+const machines = ref<MachineInfo[]>([])
+const searchText = ref('')
+const statusFilter = ref('')
+const currentPage = ref(1)
+const pageSize = ref(20)
 
-const dialogVisible = ref(false)
-const dialogType = ref<'add' | 'edit'>('add')
-const submitLoading = ref(false)
-const formRef = ref<FormInstance>()
+const installDialogVisible = ref(false)
+const installCommand = ref('')
 
-const formData = reactive<NodeFormData & { id?: number }>({
-  name: '',
-  ip: '',
-  os: '',
-  cpuCores: 8,
-  memoryMb: 32768,
-  diskGb: 512,
-  clusterName: '',
+const detailVisible = ref(false)
+const detailMachine = ref<MachineInfo | null>(null)
+
+const filteredData = computed(() => {
+  return machines.value.filter((m) => {
+    const matchText = !searchText.value ||
+      m.hostname.toLowerCase().includes(searchText.value.toLowerCase()) ||
+      m.ip.includes(searchText.value)
+    const matchStatus = !statusFilter.value || m.status === statusFilter.value
+    return matchText && matchStatus
+  })
 })
 
-const formRules: FormRules = {
-  name: [
-    { required: true, message: '请输入节点名称', trigger: 'blur' },
-    { min: 2, max: 50, message: '名称长度应在2-50个字符之间', trigger: 'blur' },
-  ],
-  ip: [
-    { required: true, message: '请输入IP地址', trigger: 'blur' },
-    { pattern: /^(\d{1,3}\.){3}\d{1,3}$/, message: 'IP地址格式不正确', trigger: 'blur' },
-  ],
-  os: [{ required: true, message: '请输入操作系统', trigger: 'blur' }],
-  cpuCores: [{ required: true, message: '请输入CPU核心数', trigger: 'blur' }],
-  memoryMb: [{ required: true, message: '请输入内存大小', trigger: 'blur' }],
-  diskGb: [{ required: true, message: '请输入磁盘大小', trigger: 'blur' }],
-}
+const paginatedData = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  return filteredData.value.slice(start, start + pageSize.value)
+})
 
 async function loadData() {
   loading.value = true
   try {
-    const res = await getNodeListApi(queryForm)
-    tableData.value = res.data.list
-    total.value = res.data.total
-  } catch { /* handled */ } finally {
+    machines.value = await getMachinesApi()
+  } catch {
+    ElMessage.error('获取机器列表失败')
+  } finally {
     loading.value = false
   }
 }
 
-function handleSearch() {
-  queryForm.page = 1
-  loadData()
-}
-
-function handleReset() {
-  queryForm.name = ''
-  queryForm.ip = ''
-  queryForm.status = ''
-  queryForm.page = 1
-  loadData()
-}
-
-function handleSortChange({ prop, order }: { prop: string; order: string }) {
-  ;(queryForm as Record<string, unknown>).sortField = prop
-  ;(queryForm as Record<string, unknown>).sortOrder = order === 'ascending' ? 'asc' : order === 'descending' ? 'desc' : ''
-  loadData()
-}
-
-function handleSelectionChange(selection: NodeInfo[]) {
-  selectedIds.value = selection.map((item) => item.id)
-}
-
-function handleAdd() {
-  dialogType.value = 'add'
-  dialogVisible.value = true
-}
-
-function handleEdit(row: NodeInfo) {
-  dialogType.value = 'edit'
-  Object.assign(formData, {
-    id: row.id, name: row.name, ip: row.ip, os: row.os,
-    cpuCores: row.cpuCores, memoryMb: row.memoryMb, diskGb: row.diskGb, clusterName: row.clusterName,
-  })
-  dialogVisible.value = true
-}
-
-function handleDetail(row: NodeInfo) {
-  ElMessage.info(`查看节点详情: ${row.name}`)
-}
-
-async function handleSubmit() {
-  if (!formRef.value) return
-  try { await formRef.value.validate() } catch { return }
-  submitLoading.value = true
+async function handleSyncHardware() {
+  syncLoading.value = true
   try {
-    if (dialogType.value === 'add') {
-      await createNodeApi(formData)
-      ElMessage.success('节点创建成功')
-    } else {
-      await updateNodeApi(formData as NodeFormData & { id: number })
-      ElMessage.success('节点更新成功')
-    }
-    dialogVisible.value = false
-    loadData()
-  } catch { /* handled */ } finally {
-    submitLoading.value = false
+    machines.value = await syncHardwareApi()
+    ElMessage.success('硬件信息已同步')
+  } catch {
+    ElMessage.error('同步硬件信息失败')
+  } finally {
+    syncLoading.value = false
   }
 }
 
-async function handleDelete(row: NodeInfo) {
-  try {
-    await deleteNodeApi(row.id)
-    ElMessage.success('删除成功')
-    loadData()
-  } catch { /* handled */ }
+function handleSearch() {
+  currentPage.value = 1
 }
 
-async function handleBatchDelete() {
-  try {
-    await ElMessageBox.confirm(`确定要删除选中的 ${selectedIds.value.length} 个节点吗？`, '批量删除确认', {
-      confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning',
-    })
-    await batchDeleteNodeApi(selectedIds.value)
-    ElMessage.success('批量删除成功')
-    selectedIds.value = []
-    loadData()
-  } catch { /* cancelled or failed */ }
+function showDetail(row: MachineInfo) {
+  detailMachine.value = row
+  detailVisible.value = true
 }
 
-function handleExport() {
-  exportToExcel({
-    filename: '节点列表',
-    columns: {
-      name: '节点名称', ip: 'IP地址', os: '操作系统', cpuCores: 'CPU核心数',
-      memoryMb: '内存(MB)', diskGb: '磁盘(GB)', gpuCount: 'GPU数量', status: '状态', updatedAt: '最后更新时间',
-    },
-    data: tableData.value,
+async function handleGetInstallCommand() {
+  try {
+    const res = await getInstallCommandApi()
+    installCommand.value = res.command
+    installDialogVisible.value = true
+  } catch {
+    ElMessage.error('获取安装命令失败，请检查网络连接')
+  }
+}
+
+function copyInstallCommand() {
+  navigator.clipboard.writeText(installCommand.value).then(() => {
+    ElMessage.success('命令已复制到剪贴板')
+  }).catch(() => {
+    ElMessage.error('复制失败，请手动复制')
   })
 }
 
-function resetForm() {
-  Object.assign(formData, {
-    id: undefined, name: '', ip: '', os: '', cpuCores: 8, memoryMb: 32768, diskGb: 512, clusterName: '',
-  })
-  formRef.value?.clearValidate()
+async function handleDelete(row: MachineInfo) {
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除节点 ${row.hostname}（${row.ip}）吗？\n\n删除后 Agent 下次心跳时会自动退出；若需立即停用，请登录机器执行 systemctl stop orbit-agent`,
+      '删除确认',
+      { confirmButtonText: '确定删除', cancelButtonText: '取消', type: 'warning' }
+    )
+    const msg = await deleteMachineApi(row.ip, row.port)
+    ElMessage.success(msg || '删除成功')
+    loadData()
+  } catch {
+    // 用户取消
+  }
+}
+
+function formatMemoryKB(kb: number): string {
+  if (!kb) return '-'
+  const gb = kb / 1024 / 1024
+  if (gb >= 1) return `${gb.toFixed(1)} GB`
+  return `${(kb / 1024).toFixed(0)} MB`
+}
+
+function formatDiskTotal(disks: { total_gb: number }[]): string {
+  if (!disks || disks.length === 0) return '-'
+  const total = disks.reduce((sum, d) => sum + d.total_gb, 0)
+  return `${total} GB`
+}
+
+function formatUptime(seconds: number): string {
+  if (!seconds) return '-'
+  const days = Math.floor(seconds / 86400)
+  const hours = Math.floor((seconds % 86400) / 3600)
+  const mins = Math.floor((seconds % 3600) / 60)
+  if (days > 0) return `${days}天${hours}小时`
+  if (hours > 0) return `${hours}小时${mins}分`
+  return `${mins}分钟`
 }
 
 onMounted(() => loadData())
@@ -384,15 +363,61 @@ onMounted(() => loadData())
   margin-top: 4px;
 }
 
+.header-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.table-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.table-toolbar-left {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.total-text {
+  font-size: 13px;
+  color: var(--text-color-secondary);
+}
+
 .node-name {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   font-weight: var(--font-weight-medium);
 }
 
-.node-icon {
+.node-name.clickable {
+  cursor: pointer;
   color: var(--el-color-primary);
+}
+
+.node-name.clickable:hover {
+  text-decoration: underline;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.status-online {
+  background-color: var(--el-color-success);
+  box-shadow: 0 0 6px var(--el-color-success-light-5);
+}
+
+.status-offline {
+  background-color: var(--el-color-danger);
+  box-shadow: 0 0 6px var(--el-color-danger-light-5);
 }
 
 .ip-code {
@@ -402,5 +427,77 @@ onMounted(() => loadData())
   border-radius: 4px;
   background: var(--el-fill-color-light);
   color: var(--text-color-primary);
+}
+
+.core-badge {
+  margin-left: 6px;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--el-color-primary-light-9);
+  color: var(--el-color-primary);
+}
+
+.text-muted {
+  color: var(--text-color-secondary);
+}
+
+/* Detail dialog */
+.detail-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.detail-section h4 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-color-primary);
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+
+.detail-item {
+  display: flex;
+  align-items: center;
+  padding: 5px 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.detail-item .label {
+  width: 100px;
+  flex-shrink: 0;
+  color: var(--text-color-secondary);
+}
+
+/* Install dialog */
+.install-command-content {
+  padding: 10px 0;
+}
+
+.install-tip {
+  margin-bottom: 12px;
+  color: var(--text-color-primary);
+}
+
+.install-command-input :deep(.el-textarea__inner) {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 13px;
+  background-color: var(--el-fill-color-lighter);
+}
+
+.install-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.install-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-color-secondary);
 }
 </style>

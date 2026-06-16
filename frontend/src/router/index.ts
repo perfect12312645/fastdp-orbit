@@ -52,6 +52,18 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '集群部署', icon: 'Share' },
       },
       {
+        path: 'workflow',
+        name: 'WorkflowManagement',
+        component: () => import('@/pages/WorkflowManagement.vue'),
+        meta: { title: '工作流', icon: 'Cpu' },
+      },
+      {
+        path: 'workflow/:id/executions/:eid',
+        name: 'ExecutionDetail',
+        component: () => import('@/pages/ExecutionDetail.vue'),
+        meta: { title: '执行详情', icon: 'Cpu', hidden: true },
+      },
+      {
         path: 'testing',
         name: 'AutoTesting',
         component: () => import('@/pages/AutoTesting.vue'),

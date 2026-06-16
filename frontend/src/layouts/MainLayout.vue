@@ -123,6 +123,7 @@ const menuItems = [
   { path: '/model-service', title: '大模型服务', icon: 'mdi:robot-outline' },
   { path: '/storage', title: '存储管理', icon: 'mdi:harddisk-variant-outline' },
   { path: '/cluster', title: '集群部署', icon: 'mdi:cluster-outline' },
+  { path: '/workflow', title: '工作流', icon: 'mdi:play-circle-outline' },
   { path: '/testing', title: '自动化测试', icon: 'mdi:test-tube-outline' },
   { path: '/settings', title: '系统设置', icon: 'mdi:cog-outline' },
 ]

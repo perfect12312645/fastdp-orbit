@@ -1,5 +1,8 @@
 # Go 相关
 backend/bin/
+backend/build/
+backend/static/
+backend/dist/
 backend/tmp/
 backend/*.db
 
@@ -14,3 +17,6 @@ frontend/.env*
 .vscode/
 *.log
 tmp/
+.idea
+
+

@@ -1,0 +1,61 @@
+# Orbit Server 配置文件
+# 配置文件路径: /etc/fastdp-orbit/server.toml
+
+[orbit-server]
+# HTTP API监听地址
+address = "0.0.0.0"
+# HTTP API端口
+port = 8080
+# 运行模式: debug, release
+mode = "debug"
+
+# HTTP TLS配置
+[orbit-server.tls]
+enabled = true
+cert_file = "/etc/fastdp-orbit/certs/server/http.crt"
+key_file = "/etc/fastdp-orbit/certs/server/http.key"
+
+[database]
+# 数据库类型: sqlite, mysql, postgres
+type = "sqlite"
+# SQLite数据库路径
+path = "./data/fastdp-orbit.db"
+# MySQL/PostgreSQL配置
+host = "localhost"
+port = 5432
+user = ""
+password = ""
+dbname = "fastdp_orbit"
+
+[grpc]
+# gRPC服务监听地址
+address = "0.0.0.0"
+# gRPC服务端口 (供Agent连接)
+port = 9090
+# 默认超时时间(秒)
+default_timeout = 60
+# 集群准入Token（Agent注册时需要携带相同的Token）
+token = "fastdp-orbit-token-change-me"
+
+# gRPC TLS配置（双向TLS）
+[grpc.tls]
+enabled = true
+cert_file = "/etc/fastdp-orbit/certs/server/grpc.crt"
+key_file = "/etc/fastdp-orbit/certs/server/grpc.key"
+ca_file = "/etc/fastdp-orbit/certs/ca.crt"
+
+[log]
+# 日志级别: debug, info, warn, error
+level = "info"
+# 输出方式: stdout, file, both
+output = "both"
+# 日志文件路径 (当output=file或both时生效)
+path = "./logs/server.log"
+# 单个日志文件最大MB
+max_size = 100
+# 最多保留备份文件数
+max_backups = 30
+# 日志文件保留天数
+max_age = 30
+# 是否压缩旧日志
+compress = true

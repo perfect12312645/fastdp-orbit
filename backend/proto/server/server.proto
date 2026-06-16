@@ -1,0 +1,159 @@
+syntax = "proto3";
+
+package server;
+
+option go_package = "fastdp-orbit/backend/proto/server";
+
+// ServerService 是Server端实现的服务，供Agent端调用
+service ServerService {
+    // Register Agent注册到Server
+    rpc Register(RegisterRequest) returns (RegisterResponse);
+    
+    // Heartbeat Agent发送心跳
+    rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+    
+    // CopyFile Agent请求文件，Server流式返回文件块
+    rpc CopyFile(CopyFileRequest) returns (stream FileChunk);
+    
+    // ListDirectory Agent获取目录列表
+    rpc ListDirectory(ListDirectoryRequest) returns (ListDirectoryResponse);
+}
+
+// ==================== 注册 ====================
+
+// RegisterRequest 注册请求（携带完整机器信息）
+message RegisterRequest {
+    string ip = 1;                          // Agent监听IP
+    int32 port = 2;                         // Agent监听端口
+    string token = 3;                       // 集群准入Token
+    SystemEnvInfo env_info = 4;             // 机器环境信息
+}
+
+// SystemEnvInfo 机器环境信息详情（与agent.proto中一致）
+message SystemEnvInfo {
+    string hostname = 1;                    // 主机名
+    string virtualization = 2;              // 虚拟化类型
+    int64 uptime_seconds = 3;               // 运行时间（秒）
+    SystemInfo os = 4;                      // 操作系统信息
+    CpuInfo cpu = 5;                        // CPU信息
+    MemoryInfo memory = 6;                  // 内存信息
+    repeated DiskInfo disks = 7;            // 磁盘信息
+    repeated NetworkInfo networks = 8;      // 网卡信息
+    repeated GpuInfo gpus = 9;             // GPU信息
+    string gateway = 10;                    // 默认网关
+    FirewallInfo firewall = 11;             // 防火墙状态
+    SwapInfo swap = 12;                     // Swap信息
+    string timezone = 13;                   // 时区
+    string system_time = 14;                // 系统时间
+    string hardware_time = 15;              // 硬件时间
+}
+
+// SystemInfo 操作系统信息
+message SystemInfo {
+    string name = 1;                        // 系统名称
+    string version = 2;                     // 系统版本
+    string kernel = 3;                      // 内核版本
+    string arch = 4;                        // 架构
+}
+
+// CpuInfo CPU信息
+message CpuInfo {
+    string model = 1;                       // CPU型号
+    int32 cores = 2;                        // CPU核心数
+}
+
+// MemoryInfo 内存信息
+message MemoryInfo {
+    int64 total_kb = 1;                     // 总容量（kB）
+}
+
+// DiskInfo 磁盘信息
+message DiskInfo {
+    string device = 1;                      // 设备名
+    string type = 2;                        // 设备类型（ssd/hdd/nvme）
+    int64 total_gb = 3;                     // 总容量（GB）
+}
+
+// NetworkInfo 网卡信息
+message NetworkInfo {
+    string name = 1;                        // 网卡名
+    string ip = 2;                          // IP地址
+    string mac = 3;                         // MAC地址
+    int64 speed = 4;                        // 网卡速率（Mbps）
+    string status = 5;                      // 状态（up/down）
+}
+
+// GpuInfo GPU信息
+message GpuInfo {
+    string name = 1;                        // GPU名称
+    int32 count = 2;                        // 数量
+    string driver_version = 3;              // 驱动版本
+}
+
+// FirewallInfo 防火墙状态
+message FirewallInfo {
+    string status = 1;                      // 状态（active/inactive）
+    string enabled = 2;                     // 是否开机启动
+}
+
+// SwapInfo Swap信息
+message SwapInfo {
+    int64 total_kb = 1;                     // 总容量（kB）
+}
+
+// RegisterResponse 注册响应
+message RegisterResponse {
+    bool success = 1;                       // 是否成功
+    string message = 2;                     // 结果描述（失败时说明原因）
+}
+
+// ==================== 心跳 ====================
+
+// HeartbeatRequest 心跳请求
+message HeartbeatRequest {
+    string ip = 1;                          // Agent IP
+    int32 port = 2;                         // Agent端口
+    int64 uptime_seconds = 3;               // 运行时间（秒）
+    string system_time = 4;                 // 系统时间
+    string hardware_time = 5;               // 硬件时间
+}
+
+// HeartbeatResponse 心跳响应
+message HeartbeatResponse {
+    bool success = 1;
+    bool agent_exit = 2;                     // 通知Agent退出（删除机器时使用）
+}
+
+// ==================== 文件传输 ====================
+
+// CopyFileRequest 文件传输请求（Agent发起）
+message CopyFileRequest {
+    string source_path = 1;                 // 源文件路径（Server端）
+}
+
+// FileChunk 文件块（Server流式返回）
+message FileChunk {
+    bytes data = 1;                         // 块数据
+}
+
+// ==================== 目录查询 ====================
+
+// ListDirectoryRequest 目录列表请求
+message ListDirectoryRequest {
+    string path = 1;                        // 目录路径
+    bool recursive = 2;                     // 是否递归
+}
+
+// FileInfo 文件信息
+message FileInfo {
+    string path = 1;                        // 相对路径
+    bool is_dir = 2;                        // 是否是目录
+    int64 size = 3;                         // 文件大小（字节）
+    int64 modified_time = 4;                // 修改时间（Unix时间戳）
+    string permissions = 5;                 // 权限
+}
+
+// ListDirectoryResponse 目录列表响应
+message ListDirectoryResponse {
+    repeated FileInfo files = 1;            // 文件列表
+}

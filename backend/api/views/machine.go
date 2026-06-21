@@ -25,6 +25,7 @@ var AgentConnPool *grpc.AgentConnPool
 
 // MachineInfo 返回给前端的机器信息
 type MachineInfo struct {
+	ID              uint          `json:"id"`
 	IP              string        `json:"ip"`
 	Port            int           `json:"port"`
 	Status          string        `json:"status"`
@@ -150,6 +151,7 @@ func SyncHardware(c *gin.Context) {
 
 // fillFromSnapshot 从缓存快照填充信息
 func fillFromSnapshot(info *MachineInfo, snap *cache.MachineSnapshot) {
+	info.ID = snap.ID
 	info.Hostname = snap.Hostname
 	info.Virtualization = snap.Virtualization
 	info.OSName = snap.OSName

@@ -21,6 +21,7 @@ export interface GPUInfo {
 }
 
 export interface MachineInfo {
+  id: number
   ip: string
   port: number
   status: string

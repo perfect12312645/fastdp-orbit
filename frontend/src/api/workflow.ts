@@ -44,3 +44,28 @@ export function getExecutionsApi(workflowId: number): Promise<WorkflowExecution[
 export function getExecutionApi(workflowId: number, executionId: number): Promise<WorkflowExecution> {
   return request.get(`/workflows/${workflowId}/executions/${executionId}`).then((res) => res.data.data)
 }
+
+/** 暂停执行 */
+export function pauseExecutionApi(workflowId: number, executionId: number): Promise<void> {
+  return request.post(`/workflows/${workflowId}/executions/${executionId}/pause`).then((res) => res.data)
+}
+
+/** 恢复执行 */
+export function resumeExecutionApi(workflowId: number, executionId: number): Promise<void> {
+  return request.post(`/workflows/${workflowId}/executions/${executionId}/resume`).then((res) => res.data)
+}
+
+/** 终止执行 */
+export function cancelExecutionApi(workflowId: number, executionId: number): Promise<void> {
+  return request.post(`/workflows/${workflowId}/executions/${executionId}/cancel`).then((res) => res.data)
+}
+
+/** 重试整个执行 */
+export function retryExecutionApi(workflowId: number, executionId: number): Promise<void> {
+  return request.post(`/workflows/${workflowId}/executions/${executionId}/retry`).then((res) => res.data)
+}
+
+/** 重试单个阶段 */
+export function retryStageApi(workflowId: number, executionId: number, stageId: number): Promise<void> {
+  return request.post(`/workflows/${workflowId}/executions/${executionId}/stages/${stageId}/retry`).then((res) => res.data)
+}

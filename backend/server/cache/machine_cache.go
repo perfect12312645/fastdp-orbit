@@ -16,6 +16,7 @@ import (
 // MachineSnapshot 内存中的机器快照
 type MachineSnapshot struct {
 	// 静态信息（注册时写入DB，内存也保留一份用于返回）
+	ID              uint
 	IP              string
 	Port            int
 	Hostname        string
@@ -78,6 +79,7 @@ func (c *MachineCache) LoadFromDB() error {
 
 	for _, m := range machines {
 		c.machines[machineKey(m.IP, m.Port)] = &MachineSnapshot{
+			ID:              m.ID,
 			IP:              m.IP,
 			Port:            m.Port,
 			Hostname:        m.Hostname,
@@ -138,8 +140,7 @@ func (c *MachineCache) GetSnapshot(ip string, port int) (*MachineSnapshot, bool)
 		return nil, false
 	}
 	// 返回副本
-	result := *snap
-	return &result, true
+	return new(*snap), true
 }
 
 // HasMachine 检查机器是否在缓存中
@@ -374,6 +375,7 @@ func (c *MachineCache) Register(snap *MachineSnapshot) error {
 	}
 
 	// 写入缓存
+	snap.ID = dbMachine.ID
 	snap.LastSeenAt = time.Now()
 	snap.Status = "online"
 	snap.StatusChanged = false

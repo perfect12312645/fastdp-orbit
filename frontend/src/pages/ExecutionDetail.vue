@@ -1,11 +1,34 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <div>
+      <div class="header-left">
         <el-button link @click="goBack">
           <Icon icon="mdi:arrow-left" :size="18" /> 返回
         </el-button>
         <h2>执行详情</h2>
+      </div>
+      <div class="header-actions" v-if="execution">
+        <template v-if="execution.status === 'running'">
+          <el-button type="warning" @click="handlePause">
+            <Icon icon="mdi:pause" :size="16" /> 暂停
+          </el-button>
+          <el-button type="danger" @click="handleCancel">
+            <Icon icon="mdi:stop" :size="16" /> 终止
+          </el-button>
+        </template>
+        <template v-else-if="execution.status === 'paused'">
+          <el-button type="success" @click="handleResume">
+            <Icon icon="mdi:play" :size="16" /> 恢复
+          </el-button>
+          <el-button type="danger" @click="handleCancel">
+            <Icon icon="mdi:stop" :size="16" /> 终止
+          </el-button>
+        </template>
+        <template v-else-if="execution.status === 'failed'">
+          <el-button type="primary" @click="handleRetryExecution">
+            <Icon icon="mdi:restart" :size="16" /> 重新执行
+          </el-button>
+        </template>
       </div>
     </div>
 
@@ -37,65 +60,101 @@
           </div>
         </div>
 
-        <!-- 阶段执行详情 -->
+        <!-- 阶段组执行详情 -->
         <div class="stages-container">
           <div
-            v-for="(se, sei) in execution.stage_executions"
-            :key="se.id"
+            v-for="(sge, sgei) in execution.stage_group_executions"
+            :key="sge.id"
             class="stage-card"
           >
             <div class="stage-header">
               <div class="stage-status">
-                <Icon :icon="getStageIcon(se.status)" :size="20" :class="'status-' + se.status" />
+                <Icon :icon="getStageIcon(sge.status)" :size="20" :class="'status-' + sge.status" />
               </div>
               <div class="stage-info">
-                <span class="stage-name">阶段 {{ sei + 1 }}: {{ se.stage?.name || `Stage #${se.stage_id}` }}</span>
-                <span class="stage-time" v-if="se.started_at">
-                  {{ formatDateTime(se.started_at) }}
-                  <template v-if="se.finished_at"> ~ {{ formatDateTime(se.finished_at) }}</template>
+                <span class="stage-name">阶段组 {{ sgei + 1 }}: {{ sge.group?.name || `Group #${sge.group_id}` }}</span>
+                <span class="stage-time" v-if="sge.started_at">
+                  {{ formatDateTime(sge.started_at) }}
+                  <template v-if="sge.finished_at"> ~ {{ formatDateTime(sge.finished_at) }}</template>
                 </span>
               </div>
-              <el-tag :type="getStatusType(se.status)" size="small">
-                {{ getStatusLabel(se.status) }}
+              <el-tag :type="getStatusType(sge.status)" size="small">
+                {{ getStatusLabel(sge.status) }}
               </el-tag>
+              <el-button
+                v-if="sge.status === 'failed' && execution.status !== 'cancelled'"
+                type="warning"
+                link
+                size="small"
+                @click="handleRetryStage(sge.id)"
+              >
+                <Icon icon="mdi:restart" :size="14" /> 重试
+              </el-button>
             </div>
 
-            <!-- 任务列表 -->
-            <div class="tasks-container" v-if="se.task_executions?.length">
+            <!-- 子阶段列表 -->
+            <div class="tasks-container" v-if="sge.stage_executions?.length">
               <div
-                v-for="(te, tei) in se.task_executions"
-                :key="te.id"
+                v-for="(se, sei) in sge.stage_executions"
+                :key="se.id"
                 class="task-item"
               >
                 <div class="task-header">
-                  <Icon :icon="getTaskIcon(te.status)" :size="16" :class="'status-' + te.status" />
-                  <span class="task-name">{{ te.task?.name || `Task #${te.task_id}` }}</span>
-                  <span class="task-host">{{ te.task?.host }}</span>
-                  <span class="task-duration" v-if="te.duration_ms">{{ te.duration_ms }}ms</span>
-                  <el-tag :type="getStatusType(te.status)" size="small">
-                    {{ getStatusLabel(te.status) }}
+                  <Icon :icon="getTaskIcon(se.status)" :size="16" :class="'status-' + se.status" />
+                  <span class="task-name">{{ se.stage?.name || `Stage #${se.stage_id}` }}</span>
+                  <span class="task-host">{{ se.stage?.tasks?.length || 0 }} 个任务</span>
+                  <el-tag :type="getStatusType(se.status)" size="small">
+                    {{ getStatusLabel(se.status) }}
                   </el-tag>
                 </div>
-                <div class="task-output" v-if="te.output">
-                  <pre>{{ te.output }}</pre>
-                </div>
-                <div class="task-error" v-if="te.error">
-                  <pre>{{ te.error }}</pre>
+
+                <!-- 任务执行列表 -->
+                <div class="subtasks-container" v-if="se.task_executions?.length">
+                  <div
+                    v-for="(te, tei) in se.task_executions"
+                    :key="te.id"
+                    class="subtask-item"
+                  >
+                    <div class="task-header">
+                      <Icon :icon="getTaskIcon(te.status)" :size="14" :class="'status-' + te.status" />
+                      <span class="task-name">{{ te.task?.name || `Task #${te.task_id}` }}</span>
+                      <span class="task-host">{{ te.host }}</span>
+                      <span class="task-duration" v-if="te.duration_ms">{{ te.duration_ms }}ms</span>
+                      <el-tag :type="getStatusType(te.status)" size="small">
+                        {{ getStatusLabel(te.status) }}
+                      </el-tag>
+                    </div>
+                    <div class="task-output" v-if="te.output">
+                      <pre>{{ te.output }}</pre>
+                    </div>
+                    <div class="task-error" v-if="te.error">
+                      <pre>{{ te.error }}</pre>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
         </div>
+
       </template>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Icon } from '@iconify/vue'
-import { getExecutionApi } from '@/api/workflow'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import {
+  getExecutionApi,
+  pauseExecutionApi,
+  resumeExecutionApi,
+  cancelExecutionApi,
+  retryExecutionApi,
+  retryStageApi,
+} from '@/api/workflow'
 import { formatDateTime } from '@/utils/format'
 import type { WorkflowExecution } from '@/types/workflow'
 
@@ -104,17 +163,113 @@ const router = useRouter()
 
 const loading = ref(false)
 const execution = ref<WorkflowExecution | null>(null)
+let refreshTimer: ReturnType<typeof setInterval> | null = null
+
+const workflowId = computed(() => Number(route.params.id))
+const executionId = computed(() => Number(route.params.eid))
+
+const isRunning = computed(() => {
+  if (!execution.value) return false
+  if (execution.value.status === 'running' || execution.value.status === 'paused') return true
+  return execution.value.stage_group_executions?.some(
+    (sge) => sge.status === 'running'
+  ) ?? false
+})
 
 async function loadExecution() {
   loading.value = true
   try {
-    const workflowId = Number(route.params.id)
-    const executionId = Number(route.params.eid)
-    execution.value = await getExecutionApi(workflowId, executionId)
+    execution.value = await getExecutionApi(workflowId.value, executionId.value)
   } catch (e) {
     console.error(e)
   } finally {
     loading.value = false
+  }
+}
+
+function startAutoRefresh() {
+  stopAutoRefresh()
+  refreshTimer = setInterval(() => {
+    if (isRunning.value) {
+      loadExecution()
+    } else {
+      stopAutoRefresh()
+    }
+  }, 3000)
+}
+
+function stopAutoRefresh() {
+  if (refreshTimer) {
+    clearInterval(refreshTimer)
+    refreshTimer = null
+  }
+}
+
+async function handlePause() {
+  try {
+    await ElMessageBox.confirm('确认暂停执行？', '暂停确认', {
+      confirmButtonText: '暂停',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+    await pauseExecutionApi(workflowId.value, executionId.value)
+    ElMessage.success('已暂停')
+    loadExecution()
+  } catch (e) {
+    if (e !== 'cancel') ElMessage.error('暂停失败')
+  }
+}
+
+async function handleResume() {
+  try {
+    await resumeExecutionApi(workflowId.value, executionId.value)
+    ElMessage.success('已恢复')
+    loadExecution()
+    startAutoRefresh()
+  } catch (e) {
+    ElMessage.error('恢复失败')
+  }
+}
+
+async function handleCancel() {
+  try {
+    await ElMessageBox.confirm('确认终止执行？终止后不可恢复。', '终止确认', {
+      confirmButtonText: '终止',
+      cancelButtonText: '取消',
+      type: 'error',
+    })
+    await cancelExecutionApi(workflowId.value, executionId.value)
+    ElMessage.success('已终止')
+    loadExecution()
+  } catch (e) {
+    if (e !== 'cancel') ElMessage.error('终止失败')
+  }
+}
+
+async function handleRetryExecution() {
+  try {
+    await ElMessageBox.confirm('确认重新执行？将从头开始执行。', '重新执行确认', {
+      confirmButtonText: '重新执行',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+    await retryExecutionApi(workflowId.value, executionId.value)
+    ElMessage.success('已重新触发执行')
+    loadExecution()
+    startAutoRefresh()
+  } catch (e) {
+    if (e !== 'cancel') ElMessage.error('重新执行失败')
+  }
+}
+
+async function handleRetryStage(stageId: number) {
+  try {
+    await retryStageApi(workflowId.value, executionId.value, stageId)
+    ElMessage.success('已重试该阶段')
+    loadExecution()
+    startAutoRefresh()
+  } catch (e) {
+    ElMessage.error('重试失败')
   }
 }
 
@@ -169,7 +324,13 @@ function getTaskIcon(status: string) {
   return map[status] || 'mdi:circle-outline'
 }
 
-onMounted(loadExecution)
+onMounted(() => {
+  loadExecution().then(() => {
+    if (isRunning.value) startAutoRefresh()
+  })
+})
+
+onUnmounted(stopAutoRefresh)
 </script>
 
 <style scoped>
@@ -181,6 +342,9 @@ onMounted(loadExecution)
 }
 
 .page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
   margin-bottom: 20px;
 }
 
@@ -188,6 +352,17 @@ onMounted(loadExecution)
   margin: 8px 0 0;
   font-size: 22px;
   font-weight: 600;
+}
+
+.header-left {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.header-actions {
+  display: flex;
+  gap: 8px;
 }
 
 .page-content {
@@ -321,6 +496,20 @@ onMounted(loadExecution)
   margin: 0;
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+.subtasks-container {
+  padding: 4px 8px;
+  border-top: 1px solid var(--el-border-color-lighter);
+}
+
+.subtask-item {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+
+.subtask-item:last-child {
+  border-bottom: none;
 }
 
 .status-running {

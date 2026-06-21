@@ -46,6 +46,16 @@ func SetupRouter(cfg *config.ServerConfig, mc *cache.MachineCache, pool *serverg
 			machines.POST("/:ip/:port", views.ExecOnMachine)
 		}
 
+		// Machine groups
+		machineGroups := api.Group("/machine-groups")
+		{
+			machineGroups.GET("", views.ListMachineGroups)
+			machineGroups.POST("", views.CreateMachineGroup)
+			machineGroups.GET("/:id", views.GetMachineGroup)
+			machineGroups.PUT("/:id", views.UpdateMachineGroup)
+			machineGroups.DELETE("/:id", views.DeleteMachineGroup)
+		}
+
 		// Workflow/Orchestration
 		workflows := api.Group("/workflows")
 		{
@@ -57,6 +67,13 @@ func SetupRouter(cfg *config.ServerConfig, mc *cache.MachineCache, pool *serverg
 			workflows.POST("/:id/execute", views.ExecuteWorkflow)
 			workflows.GET("/:id/executions", views.ListExecutions)
 			workflows.GET("/:id/executions/:eid", views.GetExecution)
+
+			// 执行控制
+			workflows.POST("/:id/executions/:eid/pause", views.PauseWorkflow)
+			workflows.POST("/:id/executions/:eid/resume", views.ResumeWorkflow)
+			workflows.POST("/:id/executions/:eid/cancel", views.CancelWorkflow)
+			workflows.POST("/:id/executions/:eid/retry", views.RetryExecution)
+			workflows.POST("/:id/executions/:eid/stages/:sid/retry", views.RetryStage)
 		}
 
 		// Templates
@@ -67,6 +84,20 @@ func SetupRouter(cfg *config.ServerConfig, mc *cache.MachineCache, pool *serverg
 			templates.GET("/:id", views.GetTemplate)
 			templates.PUT("/:id", views.UpdateTemplate)
 			templates.DELETE("/:id", views.DeleteTemplate)
+		}
+
+		// Stage Templates（阶段模板管理）
+		stageTemplates := api.Group("/stage-templates")
+		{
+			stageTemplates.GET("", views.ListStageTemplates)
+			stageTemplates.POST("", views.CreateStageTemplate)
+			stageTemplates.GET("/:id", views.GetStageTemplate)
+			stageTemplates.PUT("/:id", views.UpdateStageTemplate)
+			stageTemplates.DELETE("/:id", views.DeleteStageTemplate)
+
+			// 版本管理
+			stageTemplates.GET("/:id/versions", views.ListStageTemplateVersions)
+			stageTemplates.POST("/:id/rollback", views.RollbackStageTemplate)
 		}
 
 		// Cluster management

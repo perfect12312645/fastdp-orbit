@@ -98,8 +98,12 @@ func main() {
 	workflowService := workflowsvc.NewService(db)
 	views.WorkflowService = workflowService
 
+	// 注入机器分组数据库
+	views.MachineGroupDB = db
+
 	// 创建执行引擎
-	_ = orchestrator.NewOrchestrator(db, agentConnPool)
+	eng := orchestrator.NewOrchestrator(db, agentConnPool)
+	views.Orchestrator = eng
 
 	// 打印启动信息
 	fmt.Println("╔════════════════════════════════════════════════╗")

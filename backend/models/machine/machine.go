@@ -63,3 +63,18 @@ type MachineGPU struct {
 	Count         int32  `json:"count"`
 	DriverVersion string `json:"driver_version" gorm:"size:50"`
 }
+
+// MachineGroup 机器分组
+type MachineGroup struct {
+	ID          uint           `json:"id" gorm:"primaryKey"`
+	Name        string         `json:"name" gorm:"size:100;uniqueIndex;not null"` // 组名，如 "k8s_master"
+	Description string         `json:"description" gorm:"size:500"`
+	// 关联
+	Machines []Machine `json:"machines" gorm:"many2many:machine_group_members;joinForeignKey:GroupID;joinReferences:MachineID"`
+}
+
+// MachineGroupMember 分组成员关系（多对多中间表）
+type MachineGroupMember struct {
+	GroupID   uint `json:"group_id" gorm:"primaryKey;index"`
+	MachineID uint `json:"machine_id" gorm:"primaryKey;index"`
+}

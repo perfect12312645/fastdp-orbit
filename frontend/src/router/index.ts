@@ -27,11 +27,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/pages/NodeManagement.vue'),
         meta: { title: '节点管理', icon: 'Monitor' },
       },
+
       {
         path: 'gpu',
         name: 'GpuResource',
         component: () => import('@/pages/GpuResource.vue'),
-        meta: { title: 'GPU资源管理', icon: 'Cpu' },
+        meta: { title: 'GPU资源管理', icon: 'Cpu', hidden: true },
       },
       {
         path: 'model-service',
@@ -58,10 +59,22 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '工作流', icon: 'Cpu' },
       },
       {
+        path: 'workflow/:id/canvas',
+        name: 'WorkflowCanvas',
+        component: () => import('@/pages/WorkflowCanvas.vue'),
+        meta: { title: '工作流编排', icon: 'Cpu', hidden: true },
+      },
+      {
         path: 'workflow/:id/executions/:eid',
         name: 'ExecutionDetail',
         component: () => import('@/pages/ExecutionDetail.vue'),
         meta: { title: '执行详情', icon: 'Cpu', hidden: true },
+      },
+      {
+        path: 'stages',
+        name: 'StageManagement',
+        component: () => import('@/pages/StageManagement.vue'),
+        meta: { title: '阶段管理', icon: 'View' },
       },
       {
         path: 'testing',

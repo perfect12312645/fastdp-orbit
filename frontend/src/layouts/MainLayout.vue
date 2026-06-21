@@ -119,11 +119,11 @@ const isFullscreen = ref(false)
 const menuItems = [
   { path: '/dashboard', title: '仪表盘', icon: 'mdi:view-dashboard-outline' },
   { path: '/node', title: '节点管理', icon: 'mdi:server-network-outline' },
-  { path: '/gpu', title: 'GPU资源管理', icon: 'mdi:chip-outline' },
   { path: '/model-service', title: '大模型服务', icon: 'mdi:robot-outline' },
   { path: '/storage', title: '存储管理', icon: 'mdi:harddisk-variant-outline' },
   { path: '/cluster', title: '集群部署', icon: 'mdi:cluster-outline' },
   { path: '/workflow', title: '工作流', icon: 'mdi:play-circle-outline' },
+  { path: '/stages', title: '阶段管理', icon: 'mdi:view-column-outline' },
   { path: '/testing', title: '自动化测试', icon: 'mdi:test-tube-outline' },
   { path: '/settings', title: '系统设置', icon: 'mdi:cog-outline' },
 ]

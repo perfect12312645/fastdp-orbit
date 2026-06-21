@@ -3,7 +3,9 @@ package views
 import (
 	"net/http"
 	"strconv"
+	"time"
 
+	"fastdp-orbit/backend/engine/orchestrator"
 	"fastdp-orbit/backend/models/workflow"
 	workflowsvc "fastdp-orbit/backend/services/workflow"
 
@@ -13,42 +15,81 @@ import (
 // WorkflowService 工作流服务（由 main 初始化注入）
 var WorkflowService *workflowsvc.Service
 
+// Orchestrator 工作流执行引擎（由 main 初始化注入）
+var Orchestrator *orchestrator.Orchestrator
+
 // ==================== 请求/响应结构 ====================
 
 type CreateWorkflowRequest struct {
-	Name        string             `json:"name" binding:"required"`
-	Description string             `json:"description"`
-	Config      string             `json:"config"`
-	Stages      []CreateStageInput `json:"stages" binding:"required,min=1"`
+	Name        string                  `json:"name" binding:"required"`
+	Description string                  `json:"description"`
+	Config      string                  `json:"config"`
+	StageGroups []CreateStageGroupInput `json:"stage_groups"`
+	Variables   []CreateVariableInput   `json:"variables"`
+	Hooks       []CreateHookInput       `json:"hooks"`
 }
 
 type UpdateWorkflowRequest struct {
-	Name        string             `json:"name"`
+	Name        string                  `json:"name"`
+	Description string                  `json:"description"`
+	Config      string                  `json:"config"`
+	StageGroups []CreateStageGroupInput `json:"stage_groups"`
+	Variables   []CreateVariableInput   `json:"variables"`
+	Hooks       []CreateHookInput       `json:"hooks"`
+}
+
+type CreateStageGroupInput struct {
+	Name        string             `json:"name" binding:"required"`
 	Description string             `json:"description"`
-	Config      string             `json:"config"`
-	Stages      []CreateStageInput `json:"stages"`
+	Order       int                `json:"order"`
+	Mode        string             `json:"mode"` // sequential/parallel
+	Stages      []CreateStageInput `json:"stages" binding:"required,min=1"`
 }
 
 type CreateStageInput struct {
-	Name            string            `json:"name" binding:"required"`
-	Description     string            `json:"description"`
-	Order           int               `json:"order"`
-	RetryPolicy     string            `json:"retry_policy"`
-	MaxRetries      int               `json:"max_retries"`
-	ContinueOnError bool              `json:"continue_on_error"`
-	Tasks           []CreateTaskInput `json:"tasks" binding:"required,min=1"`
+	Name           string            `json:"name" binding:"required"`
+	Description    string            `json:"description"`
+	Order          int               `json:"order"`
+	MachineGroupID uint              `json:"machine_group_id"`
+	Tasks          []CreateTaskInput `json:"tasks" binding:"required,min=1"`
 }
 
 type CreateTaskInput struct {
-	Name    string `json:"name" binding:"required"`
-	Module  string `json:"module" binding:"required"`
-	Params  string `json:"params"`
-	Host    string `json:"host" binding:"required"`
-	Order   int    `json:"order"`
-	When    string `json:"when"`
-	Hooks   string `json:"hooks"`
-	Loop    string `json:"loop"`
-	Timeout int    `json:"timeout"`
+	Ref          int    `json:"ref"`
+	Name         string `json:"name" binding:"required"`
+	Module       string `json:"module" binding:"required"`
+	Params       string `json:"params"`
+	Order        int    `json:"order"`
+	When         string `json:"when"`
+	HookIDs      string `json:"hook_ids"`
+	Loop         string `json:"loop"`
+	Timeout      int    `json:"timeout"`
+	IgnoreErrors bool   `json:"ignore_errors"`
+	Retries      int    `json:"retries"`
+	Delay        int    `json:"delay"`
+	Register     string `json:"register"`
+}
+
+type CreateVariableInput struct {
+	Key         string `json:"key" binding:"required"`
+	Type        string `json:"type" binding:"required"`
+	Value       string `json:"value"`
+	Description string `json:"description"`
+	Group       string `json:"group"`
+}
+
+type CreateHookInput struct {
+	Ref          int    `json:"ref"`
+	Name         string `json:"name" binding:"required"`
+	Module       string `json:"module" binding:"required"`
+	Params       string `json:"params"`
+	Timeout      int    `json:"timeout"`
+	When         string `json:"when"`
+	Loop         string `json:"loop"`
+	IgnoreErrors bool   `json:"ignore_errors"`
+	Retries      int    `json:"retries"`
+	Delay        int    `json:"delay"`
+	Register     string `json:"register"`
 }
 
 // ==================== Handlers ====================
@@ -90,29 +131,70 @@ func CreateWorkflow(c *gin.Context) {
 		Description: req.Description,
 		Config:      req.Config,
 	}
-	for _, s := range req.Stages {
-		stage := workflow.WorkflowStage{
-			Name:            s.Name,
-			Description:     s.Description,
-			Order:           s.Order,
-			RetryPolicy:     s.RetryPolicy,
-			MaxRetries:      s.MaxRetries,
-			ContinueOnError: s.ContinueOnError,
+
+	// 构建 StageGroups
+	for _, g := range req.StageGroups {
+		group := workflow.WorkflowStageGroup{
+			Name:        g.Name,
+			Description: g.Description,
+			Order:       g.Order,
+			Mode:        g.Mode,
 		}
-		for _, t := range s.Tasks {
-			stage.Tasks = append(stage.Tasks, workflow.WorkflowTask{
-				Name:    t.Name,
-				Module:  t.Module,
-				Params:  t.Params,
-				Host:    t.Host,
-				Order:   t.Order,
-				When:    t.When,
-				Hooks:   t.Hooks,
-				Loop:    t.Loop,
-				Timeout: t.Timeout,
-			})
+		for _, s := range g.Stages {
+			stage := workflow.WorkflowStage{
+				Name:           s.Name,
+				Description:    s.Description,
+				Order:          s.Order,
+				MachineGroupID: s.MachineGroupID,
+			}
+			for _, t := range s.Tasks {
+				stage.Tasks = append(stage.Tasks, workflow.WorkflowTask{
+					Ref:          t.Ref,
+					Name:         t.Name,
+					Module:       t.Module,
+					Params:       t.Params,
+					Order:        t.Order,
+					When:         t.When,
+					HookIDs:      t.HookIDs,
+					Loop:         t.Loop,
+					Timeout:      t.Timeout,
+					IgnoreErrors: t.IgnoreErrors,
+					Retries:      t.Retries,
+					Delay:        t.Delay,
+					Register:     t.Register,
+				})
+			}
+			group.Stages = append(group.Stages, stage)
 		}
-		wf.Stages = append(wf.Stages, stage)
+		wf.StageGroups = append(wf.StageGroups, group)
+	}
+
+	// 构建 Variables
+	for _, v := range req.Variables {
+		wf.Variables = append(wf.Variables, workflow.WorkflowVariable{
+			Key:         v.Key,
+			Type:        v.Type,
+			Value:       v.Value,
+			Description: v.Description,
+			Group:       v.Group,
+		})
+	}
+
+	// 构建 Hooks
+	for _, h := range req.Hooks {
+		wf.Hooks = append(wf.Hooks, workflow.WorkflowHook{
+			Ref:          h.Ref,
+			Name:         h.Name,
+			Module:       h.Module,
+			Params:       h.Params,
+			Timeout:      h.Timeout,
+			When:         h.When,
+			Loop:         h.Loop,
+			IgnoreErrors: h.IgnoreErrors,
+			Retries:      h.Retries,
+			Delay:        h.Delay,
+			Register:     h.Register,
+		})
 	}
 
 	// 校验
@@ -176,29 +258,76 @@ func UpdateWorkflow(c *gin.Context) {
 		Description: req.Description,
 		Config:      req.Config,
 	}
-	for _, s := range req.Stages {
-		stage := workflow.WorkflowStage{
-			Name:            s.Name,
-			Description:     s.Description,
-			Order:           s.Order,
-			RetryPolicy:     s.RetryPolicy,
-			MaxRetries:      s.MaxRetries,
-			ContinueOnError: s.ContinueOnError,
+
+	// 构建 StageGroups
+	for _, g := range req.StageGroups {
+		group := workflow.WorkflowStageGroup{
+			Name:        g.Name,
+			Description: g.Description,
+			Order:       g.Order,
+			Mode:        g.Mode,
 		}
-		for _, t := range s.Tasks {
-			stage.Tasks = append(stage.Tasks, workflow.WorkflowTask{
-				Name:    t.Name,
-				Module:  t.Module,
-				Params:  t.Params,
-				Host:    t.Host,
-				Order:   t.Order,
-				When:    t.When,
-				Hooks:   t.Hooks,
-				Loop:    t.Loop,
-				Timeout: t.Timeout,
-			})
+		for _, s := range g.Stages {
+			stage := workflow.WorkflowStage{
+				Name:           s.Name,
+				Description:    s.Description,
+				Order:          s.Order,
+				MachineGroupID: s.MachineGroupID,
+			}
+			for _, t := range s.Tasks {
+				stage.Tasks = append(stage.Tasks, workflow.WorkflowTask{
+					Ref:          t.Ref,
+					Name:         t.Name,
+					Module:       t.Module,
+					Params:       t.Params,
+					Order:        t.Order,
+					When:         t.When,
+					HookIDs:      t.HookIDs,
+					Loop:         t.Loop,
+					Timeout:      t.Timeout,
+					IgnoreErrors: t.IgnoreErrors,
+					Retries:      t.Retries,
+					Delay:        t.Delay,
+					Register:     t.Register,
+				})
+			}
+			group.Stages = append(group.Stages, stage)
 		}
-		wf.Stages = append(wf.Stages, stage)
+		wf.StageGroups = append(wf.StageGroups, group)
+	}
+
+	// 构建 Variables
+	for _, v := range req.Variables {
+		wf.Variables = append(wf.Variables, workflow.WorkflowVariable{
+			Key:         v.Key,
+			Type:        v.Type,
+			Value:       v.Value,
+			Description: v.Description,
+			Group:       v.Group,
+		})
+	}
+
+	// 构建 Hooks
+	for _, h := range req.Hooks {
+		wf.Hooks = append(wf.Hooks, workflow.WorkflowHook{
+			Ref:          h.Ref,
+			Name:         h.Name,
+			Module:       h.Module,
+			Params:       h.Params,
+			Timeout:      h.Timeout,
+			When:         h.When,
+			Loop:         h.Loop,
+			IgnoreErrors: h.IgnoreErrors,
+			Retries:      h.Retries,
+			Delay:        h.Delay,
+			Register:     h.Register,
+		})
+	}
+
+	// 校验
+	if err := WorkflowService.ValidateWorkflow(wf); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "message": err.Error()})
+		return
 	}
 
 	if err := WorkflowService.UpdateWorkflow(uint(id), wf); err != nil {
@@ -230,19 +359,155 @@ func DeleteWorkflow(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 0, "message": "success"})
 }
 
-// ExecuteWorkflow 触发工作流执行
+// ExecuteWorkflow 触发工作流执行（创建新的执行记录并启动）
 func ExecuteWorkflow(c *gin.Context) {
-	// TODO: Phase 1.4 实现执行引擎集成
-	c.JSON(http.StatusOK, gin.H{"code": 0, "message": "执行功能开发中"})
+	if Orchestrator == nil || WorkflowService == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "message": "服务未初始化"})
+		return
+	}
+
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "message": "ID格式错误"})
+		return
+	}
+
+	// 验证工作流存在
+	wf, err := WorkflowService.GetWorkflow(uint(id))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": -1, "message": "工作流不存在"})
+		return
+	}
+
+	// 创建执行记录
+	exec := &workflow.WorkflowExecution{
+		WorkflowID: wf.ID,
+		Status:     "running",
+		Trigger:    "user",
+		StartedAt:  time.Now(),
+	}
+	if err := Orchestrator.CreateAndExecute(exec); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "message": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"code": 0, "message": "执行已启动", "data": gin.H{
+		"execution_id": exec.ID,
+	}})
 }
 
-// GetWorkflowStatus 获取工作流执行状态
-func GetWorkflowStatus(c *gin.Context) {
-	// TODO: Phase 1.4 实现执行状态查询
-	c.JSON(http.StatusOK, gin.H{"code": 0, "message": "success", "data": gin.H{"status": "pending"}})
+// PauseWorkflow 暂停工作流执行
+func PauseWorkflow(c *gin.Context) {
+	if Orchestrator == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "message": "服务未初始化"})
+		return
+	}
+
+	eid, err := strconv.ParseUint(c.Param("eid"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "message": "执行ID格式错误"})
+		return
+	}
+
+	if err := Orchestrator.Pause(uint(eid)); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "message": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"code": 0, "message": "已暂停"})
 }
 
-// ListExecutions 获取工作流执行历史
+// ResumeWorkflow 继续执行暂停的工作流
+func ResumeWorkflow(c *gin.Context) {
+	if Orchestrator == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "message": "服务未初始化"})
+		return
+	}
+
+	eid, err := strconv.ParseUint(c.Param("eid"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "message": "执行ID格式错误"})
+		return
+	}
+
+	if err := Orchestrator.Resume(uint(eid)); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "message": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"code": 0, "message": "已继续执行"})
+}
+
+// CancelWorkflow 终止工作流执行
+func CancelWorkflow(c *gin.Context) {
+	if Orchestrator == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "message": "服务未初始化"})
+		return
+	}
+
+	eid, err := strconv.ParseUint(c.Param("eid"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "message": "执行ID格式错误"})
+		return
+	}
+
+	if err := Orchestrator.Cancel(uint(eid)); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "message": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"code": 0, "message": "已终止"})
+}
+
+// RetryStage 重试失败的 stage
+func RetryStage(c *gin.Context) {
+	if Orchestrator == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "message": "服务未初始化"})
+		return
+	}
+
+	eid, err := strconv.ParseUint(c.Param("eid"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "message": "执行ID格式错误"})
+		return
+	}
+
+	sid, err := strconv.ParseUint(c.Param("sid"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "message": "Stage执行ID格式错误"})
+		return
+	}
+
+	if err := Orchestrator.RetryStage(uint(eid), uint(sid)); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "message": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"code": 0, "message": "重试已启动"})
+}
+
+// RetryExecution 重新执行整个工作流（从失败处开始）
+func RetryExecution(c *gin.Context) {
+	if Orchestrator == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "message": "服务未初始化"})
+		return
+	}
+
+	eid, err := strconv.ParseUint(c.Param("eid"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "message": "执行ID格式错误"})
+		return
+	}
+
+	if err := Orchestrator.RetryExecution(uint(eid)); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "message": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"code": 0, "message": "重新执行已启动"})
+}
+
+// GetExecution 获取执行详情
 func ListExecutions(c *gin.Context) {
 	if WorkflowService == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "message": "服务未初始化"})

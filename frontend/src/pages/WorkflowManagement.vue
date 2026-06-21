@@ -13,25 +13,31 @@
     </div>
 
     <div class="page-content">
-      <div class="toolbar">
-        <el-input v-model="searchText" placeholder="搜索工作流..." clearable class="search-input">
-          <template #prefix>
-            <Icon icon="mdi:magnify" :size="16" />
-          </template>
-        </el-input>
+      <div class="table-toolbar">
+        <div class="table-toolbar-left">
+          <el-input v-model="searchText" placeholder="搜索工作流..." clearable style="width: 240px;">
+            <template #prefix>
+              <Icon icon="mdi:magnify" :size="16" />
+            </template>
+          </el-input>
+        </div>
+        <div class="table-toolbar-right">
+          <span class="total-text">共 {{ filteredData.length }} 个工作流</span>
+        </div>
       </div>
 
       <el-table :data="paginatedData" v-loading="loading" stripe style="width: 100%">
-        <el-table-column prop="id" label="ID" width="70" />
         <el-table-column prop="name" label="名称" min-width="180">
           <template #default="{ row }">
-            <span class="link-text" @click="viewWorkflow(row)">{{ row.name }}</span>
+            <span class="link-text" @click="openCanvas(row)">{{ row.name }}</span>
           </template>
         </el-table-column>
         <el-table-column prop="description" label="描述" min-width="200" show-overflow-tooltip />
         <el-table-column label="阶段数" width="90" align="center">
           <template #default="{ row }">
-            <el-tag size="small" type="info">{{ row.stages?.length || 0 }}</el-tag>
+            <el-tag size="small" :type="row.stage_groups?.length ? 'primary' : 'info'" effect="plain">
+              {{ row.stage_groups?.length || 0 }}
+            </el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="created_at" label="创建时间" width="170">
@@ -39,13 +45,13 @@
             {{ formatDateTime(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="220" fixed="right">
+        <el-table-column label="操作" width="200" fixed="right">
           <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="executeWorkflow(row)">
-              <Icon icon="mdi:play" :size="14" /> 执行
+            <el-button type="primary" link size="small" @click="openCanvas(row)">
+              <Icon icon="mdi:edit-outline" :size="14" /> 编排
             </el-button>
-            <el-button type="primary" link size="small" @click="editWorkflow(row)">
-              <Icon icon="mdi:pencil" :size="14" /> 编辑
+            <el-button type="success" link size="small" @click="executeWorkflow(row)">
+              <Icon icon="mdi:play" :size="14" /> 执行
             </el-button>
             <el-button type="primary" link size="small" @click="viewExecutions(row)">
               <Icon icon="mdi:history" :size="14" /> 历史
@@ -68,12 +74,23 @@
       </div>
     </div>
 
-    <!-- 创建/编辑对话框 -->
-    <WorkflowEditor
-      v-model="showEditor"
-      :workflow="editingWorkflow"
-      @saved="onWorkflowSaved"
-    />
+    <!-- 创建对话框 -->
+    <el-dialog v-model="showCreate" title="创建工作流" width="480px" destroy-on-close>
+      <el-form :model="createForm" label-width="80px" ref="createFormRef" :rules="createRules">
+        <el-form-item label="名称" prop="name">
+          <el-input v-model="createForm.name" placeholder="如：Docker 批量部署" />
+        </el-form-item>
+        <el-form-item label="描述">
+          <el-input v-model="createForm.description" type="textarea" :rows="2" placeholder="可选" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showCreate = false">取消</el-button>
+        <el-button type="primary" @click="handleCreate" :loading="creating">
+          创建并编排
+        </el-button>
+      </template>
+    </el-dialog>
 
     <!-- 执行历史对话框 -->
     <el-dialog v-model="showExecutions" title="执行历史" width="700px" destroy-on-close>
@@ -112,12 +129,12 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { formatDateTime } from '@/utils/format'
 import {
   getWorkflowsApi,
+  createWorkflowApi,
   deleteWorkflowApi,
   executeWorkflowApi,
   getExecutionsApi,
 } from '@/api/workflow'
 import type { Workflow, WorkflowExecution } from '@/types/workflow'
-import WorkflowEditor from '@/components/workflow/WorkflowEditor.vue'
 
 const router = useRouter()
 
@@ -140,11 +157,14 @@ const paginatedData = computed(() => {
   return filteredData.value.slice(start, start + pageSize)
 })
 
-// 编辑器
-const showEditor = ref(false)
-const editingWorkflow = ref<Workflow | null>(null)
+const showCreate = ref(false)
+const creating = ref(false)
+const createFormRef = ref()
+const createForm = ref({ name: '', description: '' })
+const createRules = {
+  name: [{ required: true, message: '请输入工作流名称', trigger: 'blur' }],
+}
 
-// 执行历史
 const showExecutions = ref(false)
 const loadingExecutions = ref(false)
 const executions = ref<WorkflowExecution[]>([])
@@ -162,18 +182,39 @@ async function loadData() {
 }
 
 function showCreateDialog() {
-  editingWorkflow.value = null
-  showEditor.value = true
+  createForm.value = { name: '', description: '' }
+  showCreate.value = true
 }
 
-function editWorkflow(row: Workflow) {
-  editingWorkflow.value = row
-  showEditor.value = true
+async function handleCreate() {
+  try {
+    await createFormRef.value?.validate()
+  } catch {
+    return
+  }
+
+  creating.value = true
+  try {
+    const wf = await createWorkflowApi({
+      name: createForm.value.name,
+      description: createForm.value.description,
+      config: '',
+      stage_groups: [],
+      variables: [],
+      hooks: [],
+    })
+    showCreate.value = false
+    ElMessage.success('创建成功')
+    router.push(`/workflow/${wf.id}/canvas`)
+  } catch (e: any) {
+    ElMessage.error(e?.message || '创建失败')
+  } finally {
+    creating.value = false
+  }
 }
 
-function viewWorkflow(row: Workflow) {
-  editingWorkflow.value = row
-  showEditor.value = true
+function openCanvas(row: Workflow) {
+  router.push(`/workflow/${row.id}/canvas`)
 }
 
 async function executeWorkflow(row: Workflow) {
@@ -222,10 +263,6 @@ function viewExecutionDetail(row: WorkflowExecution) {
   router.push(`/workflow/${currentWorkflowId.value}/executions/${row.id}`)
 }
 
-function onWorkflowSaved() {
-  loadData()
-}
-
 function getStatusType(status: string) {
   const map: Record<string, string> = {
     running: 'warning',
@@ -254,51 +291,39 @@ onMounted(loadData)
 </script>
 
 <style scoped>
-.page-container {
-  padding: 24px;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
+.page-subtitle {
+  font-size: var(--font-size-sm);
+  color: var(--text-color-secondary);
+  margin-top: 4px;
 }
 
-.page-header {
+.header-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.table-toolbar {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 20px;
-}
-
-.page-header h2 {
-  margin: 0;
-  font-size: 22px;
-  font-weight: 600;
-}
-
-.page-subtitle {
-  margin: 4px 0 0;
-  color: var(--el-text-color-secondary);
-  font-size: 14px;
-}
-
-.page-content {
-  flex: 1;
-  background: var(--el-bg-color);
-  border-radius: 12px;
-  padding: 20px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-}
-
-.toolbar {
+  align-items: center;
   margin-bottom: 16px;
 }
 
-.search-input {
-  width: 280px;
+.table-toolbar-left {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.total-text {
+  font-size: 13px;
+  color: var(--text-color-secondary);
 }
 
 .link-text {
   color: var(--el-color-primary);
   cursor: pointer;
+  font-weight: 500;
 }
 
 .link-text:hover {

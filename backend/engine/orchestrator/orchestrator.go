@@ -94,8 +94,8 @@ import (
 	"fastdp-orbit/backend/server/grpc"
 	"fmt"
 	"sort"
-	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -131,20 +131,15 @@ func NewOrchestrator(db *gorm.DB, pool *grpc.AgentConnPool) *Orchestrator {
 	}
 }
 
-// Execute 启动工作流执行
-func (o *Orchestrator) Execute(execution *workflow.WorkflowExecution) error {
-	// 检查数据库中该执行实例是否已在运行
-	var existing workflow.WorkflowExecution
-	if err := o.db.Where("id = ?", execution.ID).First(&existing).Error; err == nil {
-		if existing.Status == "running" {
-			return fmt.Errorf("执行实例 %d 已在运行中，禁止重复提交", execution.ID)
-		}
+// CreateAndExecute 创建执行记录并启动工作流
+func (o *Orchestrator) CreateAndExecute(execution *workflow.WorkflowExecution) error {
+	// 写入数据库获取 ID
+	if err := o.db.Create(execution).Error; err != nil {
+		return fmt.Errorf("创建执行记录失败: %v", err)
 	}
-
+	// 直接启动，跳过 Execute 中的 DB 重复检查（刚创建的记录必然是 running 状态）
 	ctx, cancel := context.WithCancel(context.Background())
-
 	o.mu.Lock()
-	// 检查内存中该执行实例是否已在运行（防止短时间内重复调用）
 	if _, exists := o.running[execution.ID]; exists {
 		o.mu.Unlock()
 		cancel()
@@ -153,20 +148,8 @@ func (o *Orchestrator) Execute(execution *workflow.WorkflowExecution) error {
 	o.running[execution.ID] = &cancelContext{cancel: cancel}
 	o.ctxMap[execution.ID] = ctx
 	o.mu.Unlock()
-
-	// 异步执行
 	go o.run(ctx, execution)
-
 	return nil
-}
-
-// CreateAndExecute 创建执行记录并启动工作流
-func (o *Orchestrator) CreateAndExecute(execution *workflow.WorkflowExecution) error {
-	// 写入数据库获取 ID
-	if err := o.db.Create(execution).Error; err != nil {
-		return fmt.Errorf("创建执行记录失败: %v", err)
-	}
-	return o.Execute(execution)
 }
 
 // Pause 暂停执行（当前 stage 继续完成，不启动下一个 stage）
@@ -560,12 +543,6 @@ func (o *Orchestrator) run(ctx context.Context, execution *workflow.WorkflowExec
 		o.mu.Unlock()
 	}()
 
-	logger.Info("工作流开始执行",
-		zap.Uint("execution_id", execution.ID),
-		zap.Uint("workflow_id", execution.WorkflowID),
-		zap.String("workflow_name", execution.Workflow.Name),
-	)
-
 	// 加载 workflow 定义（含 stage_groups、stages、tasks、hooks）
 	var wf workflow.Workflow
 	if err := o.db.
@@ -575,6 +552,12 @@ func (o *Orchestrator) run(ctx context.Context, execution *workflow.WorkflowExec
 		o.failExecution(execution, fmt.Sprintf("加载工作流定义失败: %v", err))
 		return
 	}
+
+	logger.Info("工作流开始执行",
+		zap.Uint("execution_id", execution.ID),
+		zap.Uint("workflow_id", execution.WorkflowID),
+		zap.String("workflow_name", wf.Name),
+	)
 
 	// 加载每个 stage 关联的机器分组和机器
 	for i := range wf.StageGroups {
@@ -744,7 +727,7 @@ func (o *Orchestrator) run(ctx context.Context, execution *workflow.WorkflowExec
 		"finished_at": finishedAt,
 	})
 
-	logger.Info("工作流执行完成", zap.Uint("execution_id", execution.ID), zap.String("workflow_name", execution.Workflow.Name))
+	logger.Info("工作流执行完成", zap.Uint("execution_id", execution.ID), zap.String("workflow_name", wf.Name))
 }
 
 // executeStagesSequential 顺序执行 stages，返回 (是否有失败, 是否被暂停)
@@ -829,7 +812,7 @@ func (o *Orchestrator) executeStagesParallel(ctx context.Context, execution *wor
 
 // executeStage 执行单个 stage，返回是否有失败
 // 执行顺序：循环 task → 每个 task 并发执行所有机器
-// DB 优化：只记录失败的 task 执行记录，成功的不持久化
+// 优化：Params 在 stage 层解析一次，taskExec 批量写入 DB
 func (o *Orchestrator) executeStage(ctx context.Context, execution *workflow.WorkflowExecution, groupExec *workflow.WorkflowStageGroupExecution, stage workflow.WorkflowStage, hooks []workflow.WorkflowHook) bool {
 	now := time.Now()
 
@@ -867,13 +850,23 @@ func (o *Orchestrator) executeStage(ctx context.Context, execution *workflow.Wor
 			return true
 		}
 
-		// 并发执行所有机器，收集失败信息
-		type machineResult struct {
-			host   string
-			output string
-			errMsg string
+		// 在 stage 层解析一次 Params，避免每台机器重复解析
+		params := make(map[string]string)
+		if task.Params != "" {
+			if err := json.Unmarshal([]byte(task.Params), &params); err != nil {
+				logger.Warn("任务参数解析失败", zap.Uint("task_id", task.ID), zap.Error(err))
+				o.db.Model(stageExec).Updates(map[string]interface{}{
+					"status":      "failed",
+					"error":       "任务参数解析失败",
+					"finished_at": time.Now(),
+				})
+				return true
+			}
 		}
-		var failedMachines sync.Map
+
+		// 并发执行所有机器
+		var taskExecs sync.Map
+		var failCount int32
 		var wg sync.WaitGroup
 
 		for _, m := range stage.MachineGroup.Machines {
@@ -881,26 +874,31 @@ func (o *Orchestrator) executeStage(ctx context.Context, execution *workflow.Wor
 			wg.Add(1)
 			go func(m machine.Machine) {
 				defer wg.Done()
-				// 每个 goroutine 使用独立的 taskExec（仅内存，不持久化）
 				taskExec := &workflow.WorkflowTaskExecution{
 					StageExecutionID: stageExec.ID,
 					TaskID:           task.ID,
 					Host:             host,
 					Status:           "running",
 				}
-				o.executeTask(ctx, taskExec, &task, &m, hooks)
+				o.executeTask(ctx, taskExec, &task, &m, hooks, params)
+				taskExecs.Store(host, taskExec)
 				if taskExec.Status == "failed" {
-					failedMachines.Store(host, machineResult{
-						host:   host,
-						output: taskExec.Output,
-						errMsg: taskExec.Error,
-					})
+					atomic.AddInt32(&failCount, 1)
 				}
 			}(m)
 		}
 		wg.Wait()
 
-		// 检查 context（Cancel 时立即停止）
+		// 批量写入所有 taskExec，一次事务
+		o.db.Transaction(func(tx *gorm.DB) error {
+			taskExecs.Range(func(key, value interface{}) bool {
+				tx.Save(value.(*workflow.WorkflowTaskExecution))
+				return true
+			})
+			return nil
+		})
+
+		// 检查 context
 		if ctx.Err() != nil {
 			o.db.Model(stageExec).Updates(map[string]interface{}{
 				"status":      "failed",
@@ -911,69 +909,49 @@ func (o *Orchestrator) executeStage(ctx context.Context, execution *workflow.Wor
 		}
 
 		// 汇总失败信息
-		if !task.IgnoreErrors {
-			var failList []string
-			failedMachines.Range(func(key, value interface{}) bool {
-				r := value.(machineResult)
-				if r.output != "" {
-					failList = append(failList, fmt.Sprintf("[%s] %s\n输出: %s", r.host, r.errMsg, r.output))
-				} else {
-					failList = append(failList, fmt.Sprintf("[%s] %s", r.host, r.errMsg))
-				}
-				return true
+		if failCount > 0 {
+			o.db.Model(stageExec).Updates(map[string]interface{}{
+				"status":      "failed",
+				"error":       fmt.Sprintf("任务 [%s] 在 %d 台机器上失败", task.Name, failCount),
+				"finished_at": time.Now(),
 			})
-			if len(failList) > 0 {
-				errMsg := fmt.Sprintf("任务 [%s] 在 %d 台机器上失败:\n%s",
-					task.Name, len(failList), strings.Join(failList, "\n"))
-				o.db.Model(stageExec).Updates(map[string]interface{}{
-					"status":      "failed",
-					"error":       errMsg,
-					"finished_at": time.Now(),
-				})
-				return true
-			}
+			return true
 		}
 	}
 
 	// 阶段成功
-	finishedAt := time.Now()
 	o.db.Model(stageExec).Updates(map[string]interface{}{
 		"status":      "success",
-		"finished_at": finishedAt,
+		"finished_at": time.Now(),
 	})
 
 	return false
 }
 
 // executeTask 执行单个任务（通过 gRPC 调用 Agent），支持重试
-func (o *Orchestrator) executeTask(ctx context.Context, taskExec *workflow.WorkflowTaskExecution, task *workflow.WorkflowTask, m *machine.Machine, hooks []workflow.WorkflowHook) {
+// 注意：此函数不做任何 DB 写入和日志输出，由调用方批量处理
+func (o *Orchestrator) executeTask(ctx context.Context, taskExec *workflow.WorkflowTaskExecution, task *workflow.WorkflowTask, m *machine.Machine, hooks []workflow.WorkflowHook, params map[string]string) {
 	host := fmt.Sprintf("%s:%d", m.IP, m.Port)
 
-	// 检查 when 条件（支持 Go 模板表达式，如 "{{.machine.os_name}} == 'ubuntu'"）
+	// 检查 when 条件
 	if task.When != "" {
 		run, err := evaluateWhen(task.When, map[string]interface{}{
 			"machine": map[string]interface{}{
-				"os_name":   m.OSName,
-				"ip":        m.IP,
-				"hostname":  m.Hostname,
+				"os_name":    m.OSName,
+				"ip":         m.IP,
+				"hostname":   m.Hostname,
 				"os_version": m.OSVersion,
-				"arch":      m.Arch,
+				"arch":       m.Arch,
 			},
 		})
 		if err != nil {
-			logger.Error("when 条件解析失败", zap.Uint("task_id", task.ID), zap.String("when", task.When), zap.Error(err))
 			taskExec.Status = "failed"
 			taskExec.Error = fmt.Sprintf("when 条件解析失败: %v", err)
-			taskExec.DurationMs = 0
-			o.db.Save(taskExec)
 			return
 		}
 		if !run {
-			logger.Info("任务条件不满足，跳过", zap.Uint("task_id", task.ID), zap.String("when", task.When))
 			taskExec.Status = "skipped"
 			taskExec.Output = "条件不满足，跳过执行"
-			taskExec.DurationMs = 0
-			o.db.Save(taskExec)
 			return
 		}
 	}
@@ -985,119 +963,89 @@ func (o *Orchestrator) executeTask(ctx context.Context, taskExec *workflow.Workf
 
 	var lastErr string
 	for attempt := 0; attempt <= maxRetries; attempt++ {
-		// 检查 context
 		if ctx.Err() != nil {
 			taskExec.Status = "skipped"
-			taskExec.Output = "执行被中断"
-			taskExec.DurationMs = 0
-			o.db.Save(taskExec)
+			taskExec.Error = "执行被中断"
 			return
 		}
 
-		// 重试前等待（首次不等待）
+		// 重试前等待
 		if attempt > 0 && task.Delay > 0 {
-			logger.Info("任务重试等待",
-				zap.Uint("task_id", task.ID),
-				zap.Int("attempt", attempt),
-				zap.Int("delay_seconds", task.Delay),
-			)
 			select {
 			case <-ctx.Done():
 				taskExec.Status = "skipped"
-				taskExec.Output = "执行被中断"
-				taskExec.DurationMs = 0
-				o.db.Save(taskExec)
+				taskExec.Error = "执行被中断"
 				return
 			case <-time.After(time.Duration(task.Delay) * time.Second):
 			}
 		}
 
 		startTime := time.Now()
-		now := time.Now()
-		o.db.Model(taskExec).Update("started_at", now)
 
-		// 获取 Agent 连接
 		conn, err := o.pool.GetConn(host)
 		if err != nil {
 			lastErr = fmt.Sprintf("连接Agent失败: %v", err)
-			logger.Warn("任务执行失败",
-				zap.Uint("task_id", task.ID),
-				zap.String("host", host),
-				zap.Int("attempt", attempt+1),
-				zap.String("error", lastErr),
-			)
 			taskExec.DurationMs = time.Since(startTime).Milliseconds()
 			continue
 		}
 
-		// 解析 Params JSON
-		params := make(map[string]string)
-		if task.Params != "" {
-			if err := json.Unmarshal([]byte(task.Params), &params); err != nil {
-				params["command"] = task.Params
-			}
-		}
-
-		// 调用 Agent Exec RPC
 		client := agentpb.NewAgentServiceClient(conn)
-		reqCtx, cancel := context.WithTimeout(ctx, time.Duration(task.Timeout)*time.Second)
+		var reqCtx context.Context
+		var cancel context.CancelFunc
+		if task.Timeout > 0 {
+			reqCtx, cancel = context.WithTimeout(ctx, time.Duration(task.Timeout)*time.Second)
+		} else {
+			reqCtx, cancel = context.WithCancel(ctx)
+		}
 
 		resp, err := client.Exec(reqCtx, &agentpb.ExecRequest{
 			MachineId:  host,
 			Module:     task.Module,
 			Parameters: params,
 			TaskId:     fmt.Sprintf("ref-%d", task.Ref),
-			Timeout:    int32(task.Timeout),
 		})
 		cancel()
 
-		duration := time.Since(startTime)
-		taskExec.DurationMs = duration.Milliseconds()
+		// 优先使用 agent 返回的耗时，兜底用本地计算
+		if resp != nil && resp.DurationMs > 0 {
+			taskExec.DurationMs = resp.DurationMs
+		} else {
+			taskExec.DurationMs = time.Since(startTime).Milliseconds()
+		}
 
 		if err != nil {
 			lastErr = fmt.Sprintf("gRPC调用失败: %v", err)
-			logger.Warn("任务执行失败",
-				zap.Uint("task_id", task.ID),
-				zap.String("host", host),
-				zap.Int("attempt", attempt+1),
-				zap.String("error", lastErr),
-			)
 			continue
 		}
 
-		// 解析响应
-		taskExec.Output = resp.Stdout
 		if !resp.Success {
-			lastErr = resp.Stderr
+			// 分离 stderr 和 error 详情
+			taskExec.Stderr = resp.Stderr
 			if resp.Error != nil {
-				lastErr = resp.Error.Message
+				taskExec.ErrorCode = resp.Error.Code
+				taskExec.Error = resp.Error.Message
+			} else {
+				taskExec.Error = "任务执行失败（无详细错误信息）"
 			}
-			logger.Warn("任务执行返回失败",
-				zap.Uint("task_id", task.ID),
-				zap.String("host", host),
-				zap.Int("attempt", attempt+1),
-				zap.String("error", lastErr),
-			)
+			lastErr = taskExec.Error
 			continue
 		}
 
 		// 成功
 		taskExec.Status = "success"
-		taskExec.Error = ""
+		taskExec.Output = resp.Stdout
+		taskExec.Stderr = resp.Stderr
+		taskExec.Changed = resp.Changed
 
-		// 执行后置钩子
 		if task.HookIDs != "" {
 			o.executeHooks(ctx, host, task.HookIDs, hooks)
 		}
-
-		o.db.Save(taskExec)
 		return
 	}
 
 	// 所有重试均失败
 	taskExec.Status = "failed"
 	taskExec.Error = lastErr
-	o.db.Save(taskExec)
 }
 
 // executeHooks 执行后置钩子（解析 HookIDs 并执行对应的 WorkflowHook）
@@ -1144,7 +1092,13 @@ func (o *Orchestrator) executeHooks(ctx context.Context, host string, hookIDsJSO
 
 		// 调用 Agent Exec
 		client := agentpb.NewAgentServiceClient(conn)
-		hookCtx, cancel := context.WithTimeout(ctx, time.Duration(hook.Timeout)*time.Second)
+		var hookCtx context.Context
+		var cancel context.CancelFunc
+		if hook.Timeout > 0 {
+			hookCtx, cancel = context.WithTimeout(ctx, time.Duration(hook.Timeout)*time.Second)
+		} else {
+			hookCtx, cancel = context.WithCancel(ctx)
+		}
 		defer cancel()
 
 		resp, err := client.Exec(hookCtx, &agentpb.ExecRequest{
@@ -1152,7 +1106,6 @@ func (o *Orchestrator) executeHooks(ctx context.Context, host string, hookIDsJSO
 			Module:     hook.Module,
 			Parameters: params,
 			TaskId:     fmt.Sprintf("hook-ref-%d", hook.Ref),
-			Timeout:    int32(hook.Timeout),
 		})
 
 		if err != nil {

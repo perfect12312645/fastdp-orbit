@@ -1,11 +1,22 @@
 package workflow
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
 	"fastdp-orbit/backend/models/workflow"
+	"fastdp-orbit/backend/pkg/errs"
 	"fmt"
 
 	"gorm.io/gorm"
 )
+
+// generateVersionString 生成随机版本字符串（8位hex）
+func generateVersionString() string {
+	b := make([]byte, 4)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
 
 // Service 工作流业务逻辑
 type Service struct {
@@ -42,21 +53,21 @@ func (s *Service) GetWorkflow(id uint) (*workflow.Workflow, error) {
 // CreateWorkflow 创建工作流（含 stage_groups、stages、tasks、variables、hooks，事务）
 func (s *Service) CreateWorkflow(wf *workflow.Workflow) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
-		// 创建 workflow
-		if err := tx.Create(wf).Error; err != nil {
+		// 创建 workflow（跳过自动创建子关联）
+		if err := tx.Omit("StageGroups", "Variables", "Hooks").Create(wf).Error; err != nil {
 			return err
 		}
 
 		// 创建 stage_groups
 		for i := range wf.StageGroups {
 			wf.StageGroups[i].WorkflowID = wf.ID
-			if err := tx.Create(&wf.StageGroups[i]).Error; err != nil {
+			if err := tx.Omit("Stages").Create(&wf.StageGroups[i]).Error; err != nil {
 				return err
 			}
 			// 创建 stages
 			for j := range wf.StageGroups[i].Stages {
 				wf.StageGroups[i].Stages[j].StageGroupID = wf.StageGroups[i].ID
-				if err := tx.Create(&wf.StageGroups[i].Stages[j]).Error; err != nil {
+				if err := tx.Omit("Tasks").Create(&wf.StageGroups[i].Stages[j]).Error; err != nil {
 					return err
 				}
 				// 创建 tasks
@@ -132,13 +143,13 @@ func (s *Service) UpdateWorkflow(id uint, wf *workflow.Workflow) error {
 		for i := range wf.StageGroups {
 			wf.StageGroups[i].WorkflowID = id
 			wf.StageGroups[i].ID = 0
-			if err := tx.Create(&wf.StageGroups[i]).Error; err != nil {
+			if err := tx.Omit("Stages").Create(&wf.StageGroups[i]).Error; err != nil {
 				return err
 			}
 			for j := range wf.StageGroups[i].Stages {
 				wf.StageGroups[i].Stages[j].StageGroupID = wf.StageGroups[i].ID
 				wf.StageGroups[i].Stages[j].ID = 0
-				if err := tx.Create(&wf.StageGroups[i].Stages[j]).Error; err != nil {
+				if err := tx.Omit("Tasks").Create(&wf.StageGroups[i].Stages[j]).Error; err != nil {
 					return err
 				}
 				for k := range wf.StageGroups[i].Stages[j].Tasks {
@@ -348,6 +359,55 @@ func (s *Service) ValidateWorkflow(wf *workflow.Workflow) error {
 
 // ==================== StageTemplate CRUD ====================
 
+// ValidateStageTemplate 校验阶段模板定义
+func ValidateStageTemplate(name string, tasksJSON string) error {
+	if name == "" {
+		return errs.NewBadRequest(errs.CodeValidateFailed, "阶段名称不能为空")
+	}
+
+	if tasksJSON == "" {
+		return nil // 允许空任务（草稿状态）
+	}
+
+	var tasks []workflow.StageTask
+	if err := json.Unmarshal([]byte(tasksJSON), &tasks); err != nil {
+		return errs.NewBadRequest(errs.CodeValidateFailed, fmt.Sprintf("任务数据格式错误: %v", err))
+	}
+
+	if len(tasks) == 0 {
+		return nil
+	}
+
+	refSet := make(map[int]bool)
+	orderSet := make(map[int]bool)
+
+	for i, task := range tasks {
+		if task.Ref <= 0 {
+			return errs.NewBadRequest(errs.CodeValidateFailed, fmt.Sprintf("任务 %d 引用ID必须大于0", i+1))
+		}
+		if refSet[task.Ref] {
+			return errs.NewBadRequest(errs.CodeValidateFailed, fmt.Sprintf("任务引用ID %d 重复", task.Ref))
+		}
+		refSet[task.Ref] = true
+
+		if task.Name == "" {
+			return errs.NewBadRequest(errs.CodeValidateFailed, fmt.Sprintf("任务 %d 名称不能为空", i+1))
+		}
+		if task.Module == "" {
+			return errs.NewBadRequest(errs.CodeValidateFailed, fmt.Sprintf("任务 [%s] 模块类型不能为空", task.Name))
+		}
+		if task.Order <= 0 {
+			return errs.NewBadRequest(errs.CodeValidateFailed, fmt.Sprintf("任务 [%s] 执行顺序必须大于0", task.Name))
+		}
+		if orderSet[task.Order] {
+			return errs.NewBadRequest(errs.CodeValidateFailed, fmt.Sprintf("任务执行顺序 %d 重复", task.Order))
+		}
+		orderSet[task.Order] = true
+	}
+
+	return nil
+}
+
 // ListStageTemplates 获取所有阶段模板
 func (s *Service) ListStageTemplates() ([]workflow.StageTemplate, error) {
 	var templates []workflow.StageTemplate
@@ -366,17 +426,34 @@ func (s *Service) GetStageTemplate(id uint) (*workflow.StageTemplate, error) {
 	return &t, nil
 }
 
-// CreateStageTemplate 创建阶段模板（初始版本 v1）
+// CreateStageTemplate 创建阶段模板（初始版本）
 func (s *Service) CreateStageTemplate(t *workflow.StageTemplate) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
-		t.Version = 1
+		// 检查 name 唯一性（已软删除的不算）
+		var count int64
+		if err := tx.Model(&workflow.StageTemplate{}).
+			Where("name = ?", t.Name).
+			Count(&count).Error; err != nil {
+			return err
+		}
+		if count > 0 {
+			return errs.NewConflict(errs.CodeStageTemplateNameDuplicate,
+				fmt.Sprintf("阶段名称「%s」已存在", t.Name))
+		}
+
+		// 校验任务
+		if err := ValidateStageTemplate(t.Name, t.Tasks); err != nil {
+			return err
+		}
+
+		t.Version = generateVersionString()
 		if err := tx.Create(t).Error; err != nil {
 			return err
 		}
 		// 创建初始版本记录
 		version := workflow.StageTemplateVersion{
 			TemplateID:     t.ID,
-			Version:        1,
+			Version:        t.Version,
 			Name:           t.Name,
 			Description:    t.Description,
 			MachineGroupID: t.MachineGroupID,
@@ -390,24 +467,48 @@ func (s *Service) CreateStageTemplate(t *workflow.StageTemplate) error {
 // UpdateStageTemplate 更新阶段模板（强制生成新版本）
 func (s *Service) UpdateStageTemplate(id uint, t *workflow.StageTemplate, changeNote string) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
-		// 获取当前模板
+		// 获取当前模板（仅用于校验存在性和名称唯一性）
 		var existing workflow.StageTemplate
 		if err := tx.First(&existing, id).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return errs.NewNotFound(errs.CodeStageTemplateNotFound, "阶段模板不存在")
+			}
 			return err
 		}
 
-		// 将当前内容保存为历史版本
-		newVersion := existing.Version + 1
-		version := workflow.StageTemplateVersion{
+		// 如果 name 有变化，检查新 name 唯一性（排除自身和已软删除的）
+		if t.Name != existing.Name {
+			var count int64
+			if err := tx.Model(&workflow.StageTemplate{}).
+				Where("name = ? AND id != ?", t.Name, id).
+				Count(&count).Error; err != nil {
+				return err
+			}
+			if count > 0 {
+				return errs.NewConflict(errs.CodeStageTemplateNameDuplicate,
+					fmt.Sprintf("阶段名称「%s」已存在", t.Name))
+			}
+		}
+
+		// 校验任务
+		if err := ValidateStageTemplate(t.Name, t.Tasks); err != nil {
+			return err
+		}
+
+		// 生成新版本字符串
+		newVersion := generateVersionString()
+
+		// 将新内容保存为历史版本（旧版本已经在历史表中，无需重复保存）
+		versionRecord := workflow.StageTemplateVersion{
 			TemplateID:     id,
-			Version:        existing.Version,
-			Name:           existing.Name,
-			Description:    existing.Description,
-			MachineGroupID: existing.MachineGroupID,
-			Tasks:          existing.Tasks,
+			Version:        newVersion,
+			Name:           t.Name,
+			Description:    t.Description,
+			MachineGroupID: t.MachineGroupID,
+			Tasks:          t.Tasks,
 			ChangeNote:     changeNote,
 		}
-		if err := tx.Create(&version).Error; err != nil {
+		if err := tx.Create(&versionRecord).Error; err != nil {
 			return err
 		}
 
@@ -435,51 +536,32 @@ func (s *Service) DeleteStageTemplate(id uint) error {
 func (s *Service) ListStageTemplateVersions(templateID uint) ([]workflow.StageTemplateVersion, error) {
 	var versions []workflow.StageTemplateVersion
 	if err := s.db.Where("template_id = ?", templateID).
-		Order("version DESC").Find(&versions).Error; err != nil {
+		Order("created_at DESC").Find(&versions).Error; err != nil {
 		return nil, err
 	}
 	return versions, nil
 }
 
-// RollbackStageTemplate 回滚到指定版本（基于旧版本内容创建新版本）
-func (s *Service) RollbackStageTemplate(templateID uint, targetVersion int) error {
+// RollbackStageTemplate 回滚到指定版本（直接复制目标版本内容到主表）
+func (s *Service) RollbackStageTemplate(templateID uint, targetVersion string) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		// 获取目标版本内容
 		var target workflow.StageTemplateVersion
 		if err := tx.Where("template_id = ? AND version = ?", templateID, targetVersion).
 			First(&target).Error; err != nil {
-			return fmt.Errorf("版本 %d 不存在", targetVersion)
+			return errs.NewNotFound(errs.CodeStageTemplateVersionMiss,
+				fmt.Sprintf("版本 %s 不存在", targetVersion))
 		}
 
-		// 获取当前模板
-		var current workflow.StageTemplate
-		if err := tx.First(&current, templateID).Error; err != nil {
-			return err
-		}
-
-		// 将当前内容保存为历史版本
-		currentVersion := workflow.StageTemplateVersion{
-			TemplateID:     templateID,
-			Version:        current.Version,
-			Name:           current.Name,
-			Description:    current.Description,
-			MachineGroupID: current.MachineGroupID,
-			Tasks:          current.Tasks,
-			ChangeNote:     fmt.Sprintf("回滚前版本（回滚到 v%d）", targetVersion),
-		}
-		if err := tx.Create(&currentVersion).Error; err != nil {
-			return err
-		}
-
-		// 更新主表为目标版本内容，版本号递增
-		newVersion := current.Version + 1
+		// 直接将目标版本内容更新到主表，版本字符串保持不变
+		// 当前版本已在历史表中，无需重复保存
 		return tx.Model(&workflow.StageTemplate{}).Where("id = ?", templateID).Updates(
 			map[string]interface{}{
 				"name":             target.Name,
 				"description":      target.Description,
 				"machine_group_id": target.MachineGroupID,
 				"tasks":            target.Tasks,
-				"version":          newVersion,
+				"version":          target.Version,
 			},
 		).Error
 	})

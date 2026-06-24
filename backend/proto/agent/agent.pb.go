@@ -28,7 +28,6 @@ type ExecRequest struct {
 	Module        string                 `protobuf:"bytes,2,opt,name=module,proto3" json:"module,omitempty"`                                                                                   // 模块名（如"shell"、"copy"、"file"、"service"）
 	Parameters    map[string]string      `protobuf:"bytes,3,rep,name=parameters,proto3" json:"parameters,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // 模块参数
 	TaskId        string                 `protobuf:"bytes,4,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`                                                                     // 任务唯一ID（批量执行时用于关联响应）
-	Timeout       int32                  `protobuf:"varint,5,opt,name=timeout,proto3" json:"timeout,omitempty"`                                                                                // 超时时间（秒），0表示不超时
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -89,13 +88,6 @@ func (x *ExecRequest) GetTaskId() string {
 		return x.TaskId
 	}
 	return ""
-}
-
-func (x *ExecRequest) GetTimeout() int32 {
-	if x != nil {
-		return x.Timeout
-	}
-	return 0
 }
 
 // BatchExecRequest 批量执行请求（对应Playbook的一次运行）
@@ -161,18 +153,17 @@ func (x *BatchExecRequest) GetOrdered() bool {
 
 // ExecResponse 执行响应
 type ExecResponse struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	MachineId      string                 `protobuf:"bytes,1,opt,name=machine_id,json=machineId,proto3" json:"machine_id,omitempty"`                // 目标机器ID（回显，便于关联）
-	TaskId         string                 `protobuf:"bytes,2,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`                         // 任务ID（回显，批量执行时关联请求）
-	Success        bool                   `protobuf:"varint,3,opt,name=success,proto3" json:"success,omitempty"`                                    // 执行是否成功（不代表是否有变更）
-	Stdout         string                 `protobuf:"bytes,4,opt,name=stdout,proto3" json:"stdout,omitempty"`                                       // 标准输出（模块正常输出）
-	Stderr         string                 `protobuf:"bytes,5,opt,name=stderr,proto3" json:"stderr,omitempty"`                                       // 标准错误（非致命警告）
-	Changed        bool                   `protobuf:"varint,6,opt,name=changed,proto3" json:"changed,omitempty"`                                    // 是否产生变更（幂等性核心：true=有变更，false=无变更）
-	ChangedDetails string                 `protobuf:"bytes,7,opt,name=changed_details,json=changedDetails,proto3" json:"changed_details,omitempty"` // 变更详情（如"创建文件/test.txt"）
-	Error          *ErrorDetail           `protobuf:"bytes,8,opt,name=error,proto3" json:"error,omitempty"`                                         // 错误详情（success=false时非空）
-	DurationMs     int64                  `protobuf:"varint,9,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"`            // 执行耗时（毫秒）
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	MachineId     string                 `protobuf:"bytes,1,opt,name=machine_id,json=machineId,proto3" json:"machine_id,omitempty"`     // 目标机器ID（回显，便于关联）
+	TaskId        string                 `protobuf:"bytes,2,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`              // 任务ID（回显，批量执行时关联请求）
+	Success       bool                   `protobuf:"varint,3,opt,name=success,proto3" json:"success,omitempty"`                         // 执行是否成功（不代表是否有变更）
+	Stdout        string                 `protobuf:"bytes,4,opt,name=stdout,proto3" json:"stdout,omitempty"`                            // 标准输出（模块正常输出）
+	Stderr        string                 `protobuf:"bytes,5,opt,name=stderr,proto3" json:"stderr,omitempty"`                            // 标准错误（非致命警告）
+	Changed       bool                   `protobuf:"varint,6,opt,name=changed,proto3" json:"changed,omitempty"`                         // 是否产生变更（幂等性核心：true=有变更，false=无变更）
+	Error         *ErrorDetail           `protobuf:"bytes,7,opt,name=error,proto3" json:"error,omitempty"`                              // 错误详情（success=false时非空）
+	DurationMs    int64                  `protobuf:"varint,8,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"` // 执行耗时（毫秒）
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ExecResponse) Reset() {
@@ -245,13 +236,6 @@ func (x *ExecResponse) GetChanged() bool {
 		return x.Changed
 	}
 	return false
-}
-
-func (x *ExecResponse) GetChangedDetails() string {
-	if x != nil {
-		return x.ChangedDetails
-	}
-	return ""
 }
 
 func (x *ExecResponse) GetError() *ErrorDetail {
@@ -1076,7 +1060,7 @@ var File_proto_agent_agent_proto protoreflect.FileDescriptor
 
 const file_proto_agent_agent_proto_rawDesc = "" +
 	"\n" +
-	"\x17proto/agent/agent.proto\x12\x05agent\"\xfa\x01\n" +
+	"\x17proto/agent/agent.proto\x12\x05agent\"\xe0\x01\n" +
 	"\vExecRequest\x12\x1d\n" +
 	"\n" +
 	"machine_id\x18\x01 \x01(\tR\tmachineId\x12\x16\n" +
@@ -1084,15 +1068,14 @@ const file_proto_agent_agent_proto_rawDesc = "" +
 	"\n" +
 	"parameters\x18\x03 \x03(\v2\".agent.ExecRequest.ParametersEntryR\n" +
 	"parameters\x12\x17\n" +
-	"\atask_id\x18\x04 \x01(\tR\x06taskId\x12\x18\n" +
-	"\atimeout\x18\x05 \x01(\x05R\atimeout\x1a=\n" +
+	"\atask_id\x18\x04 \x01(\tR\x06taskId\x1a=\n" +
 	"\x0fParametersEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"q\n" +
 	"\x10BatchExecRequest\x12\x19\n" +
 	"\bbatch_id\x18\x01 \x01(\tR\abatchId\x12(\n" +
 	"\x05tasks\x18\x02 \x03(\v2\x12.agent.ExecRequestR\x05tasks\x12\x18\n" +
-	"\aordered\x18\x03 \x01(\bR\aordered\"\x9e\x02\n" +
+	"\aordered\x18\x03 \x01(\bR\aordered\"\xf5\x01\n" +
 	"\fExecResponse\x12\x1d\n" +
 	"\n" +
 	"machine_id\x18\x01 \x01(\tR\tmachineId\x12\x17\n" +
@@ -1100,10 +1083,9 @@ const file_proto_agent_agent_proto_rawDesc = "" +
 	"\asuccess\x18\x03 \x01(\bR\asuccess\x12\x16\n" +
 	"\x06stdout\x18\x04 \x01(\tR\x06stdout\x12\x16\n" +
 	"\x06stderr\x18\x05 \x01(\tR\x06stderr\x12\x18\n" +
-	"\achanged\x18\x06 \x01(\bR\achanged\x12'\n" +
-	"\x0fchanged_details\x18\a \x01(\tR\x0echangedDetails\x12(\n" +
-	"\x05error\x18\b \x01(\v2\x12.agent.ErrorDetailR\x05error\x12\x1f\n" +
-	"\vduration_ms\x18\t \x01(\x03R\n" +
+	"\achanged\x18\x06 \x01(\bR\achanged\x12(\n" +
+	"\x05error\x18\a \x01(\v2\x12.agent.ErrorDetailR\x05error\x12\x1f\n" +
+	"\vduration_ms\x18\b \x01(\x03R\n" +
 	"durationMs\"Q\n" +
 	"\vErrorDetail\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +

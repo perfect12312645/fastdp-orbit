@@ -6,7 +6,7 @@ export interface StageTemplate {
   description: string
   machine_group_id: number
   tasks: string // JSON string
-  version: number
+  version: string
   created_at: string
   updated_at: string
 }
@@ -14,7 +14,7 @@ export interface StageTemplate {
 export interface StageTemplateVersion {
   id: number
   template_id: number
-  version: number
+  version: string
   name: string
   description: string
   machine_group_id: number
@@ -54,6 +54,6 @@ export function listStageTemplateVersionsApi(id: number): Promise<StageTemplateV
 }
 
 /** 回滚到指定版本 */
-export function rollbackStageTemplateApi(id: number, version: number): Promise<void> {
+export function rollbackStageTemplateApi(id: number, version: string): Promise<void> {
   return request.post(`/stage-templates/${id}/rollback`, { version }).then((res) => res.data)
 }

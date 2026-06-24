@@ -1,10 +1,12 @@
 package views
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
 	"fastdp-orbit/backend/models/workflow"
+	"fastdp-orbit/backend/pkg/errs"
 
 	"github.com/gin-gonic/gin"
 )
@@ -28,7 +30,17 @@ type UpdateStageTemplateRequest struct {
 }
 
 type RollbackStageTemplateRequest struct {
-	Version int `json:"version" binding:"required"`
+	Version string `json:"version" binding:"required"`
+}
+
+// respondError 统一错误响应：区分业务错误和系统错误
+func respondError(c *gin.Context, err error) {
+	var bizErr *errs.BizError
+	if errors.As(err, &bizErr) {
+		c.JSON(bizErr.HTTPStatus(), gin.H{"code": bizErr.Code, "message": bizErr.Message})
+		return
+	}
+	c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "message": "系统内部错误"})
 }
 
 // ==================== Handlers ====================
@@ -42,7 +54,7 @@ func ListStageTemplates(c *gin.Context) {
 
 	templates, err := WorkflowService.ListStageTemplates()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "message": "系统内部错误"})
 		return
 	}
 	if templates == nil {
@@ -60,7 +72,7 @@ func CreateStageTemplate(c *gin.Context) {
 
 	var req CreateStageTemplateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "message": "参数错误: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": errs.CodeParamInvalid, "message": "参数错误: " + err.Error()})
 		return
 	}
 
@@ -71,7 +83,7 @@ func CreateStageTemplate(c *gin.Context) {
 		Tasks:          req.Tasks,
 	}
 	if err := WorkflowService.CreateStageTemplate(t); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "message": "创建失败: " + err.Error()})
+		respondError(c, err)
 		return
 	}
 
@@ -87,13 +99,13 @@ func GetStageTemplate(c *gin.Context) {
 
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "message": "ID格式错误"})
+		c.JSON(http.StatusBadRequest, gin.H{"code": errs.CodeIDFormat, "message": "ID格式错误"})
 		return
 	}
 
 	t, err := WorkflowService.GetStageTemplate(uint(id))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": -1, "message": "阶段模板不存在"})
+		c.JSON(http.StatusNotFound, gin.H{"code": errs.CodeStageTemplateNotFound, "message": "阶段模板不存在"})
 		return
 	}
 
@@ -109,13 +121,13 @@ func UpdateStageTemplate(c *gin.Context) {
 
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "message": "ID格式错误"})
+		c.JSON(http.StatusBadRequest, gin.H{"code": errs.CodeIDFormat, "message": "ID格式错误"})
 		return
 	}
 
 	var req UpdateStageTemplateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "message": "参数错误: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": errs.CodeParamInvalid, "message": "参数错误: " + err.Error()})
 		return
 	}
 
@@ -126,7 +138,7 @@ func UpdateStageTemplate(c *gin.Context) {
 		Tasks:          req.Tasks,
 	}
 	if err := WorkflowService.UpdateStageTemplate(uint(id), t, req.ChangeNote); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "message": "更新失败: " + err.Error()})
+		respondError(c, err)
 		return
 	}
 
@@ -142,12 +154,12 @@ func DeleteStageTemplate(c *gin.Context) {
 
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "message": "ID格式错误"})
+		c.JSON(http.StatusBadRequest, gin.H{"code": errs.CodeIDFormat, "message": "ID格式错误"})
 		return
 	}
 
 	if err := WorkflowService.DeleteStageTemplate(uint(id)); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "message": "删除失败: " + err.Error()})
+		respondError(c, err)
 		return
 	}
 
@@ -165,13 +177,13 @@ func ListStageTemplateVersions(c *gin.Context) {
 
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "message": "ID格式错误"})
+		c.JSON(http.StatusBadRequest, gin.H{"code": errs.CodeIDFormat, "message": "ID格式错误"})
 		return
 	}
 
 	versions, err := WorkflowService.ListStageTemplateVersions(uint(id))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "message": err.Error()})
+		respondError(c, err)
 		return
 	}
 	if versions == nil {
@@ -189,18 +201,18 @@ func RollbackStageTemplate(c *gin.Context) {
 
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "message": "ID格式错误"})
+		c.JSON(http.StatusBadRequest, gin.H{"code": errs.CodeIDFormat, "message": "ID格式错误"})
 		return
 	}
 
 	var req RollbackStageTemplateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "message": "参数错误: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": errs.CodeParamInvalid, "message": "参数错误: " + err.Error()})
 		return
 	}
 
 	if err := WorkflowService.RollbackStageTemplate(uint(id), req.Version); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "message": "回滚失败: " + err.Error()})
+		respondError(c, err)
 		return
 	}
 

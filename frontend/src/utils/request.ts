@@ -18,6 +18,12 @@ export interface PaginatedData<T> {
   pageSize: number
 }
 
+/**
+ * 拦截器已处理的错误标记
+ * 拦截器弹出消息后 reject 此类型，调用方 catch 判断后不再重复弹窗
+ */
+export class HandledError extends Error {}
+
 /** 创建axios实例 */
 const request = axios.create({
   baseURL: '/api/v1',
@@ -49,7 +55,7 @@ request.interceptors.response.use(
     // 如果后端返回code不为0，视为业务错误
     if (data.code !== 0) {
       ElMessage.error(data.message || '请求失败')
-      return Promise.reject(new Error(data.message || '请求失败'))
+      return Promise.reject(new HandledError(data.message || '请求失败'))
     }
 
     return response as AxiosResponse<ApiResponse>
@@ -58,7 +64,6 @@ request.interceptors.response.use(
     if (error.response) {
       const { status } = error.response
 
-      // 401未授权：清除token并跳转登录页
       if (status === 401) {
         removeToken()
         router.push('/login')
@@ -67,10 +72,10 @@ request.interceptors.response.use(
         ElMessage.error('没有权限执行此操作')
       } else if (status === 404) {
         ElMessage.error('请求的资源不存在')
-      } else if (status === 500) {
-        ElMessage.error('服务器内部错误')
+      } else if (status === 409) {
+        ElMessage.warning(error.response.data?.message || '资源冲突')
       } else {
-        ElMessage.error(error.response.data?.message || '请求失败')
+        ElMessage.error(error.response.data?.message || `请求失败 (${status})`)
       }
     } else if (error.code === 'ECONNABORTED') {
       ElMessage.error('请求超时，请稍后重试')
@@ -78,7 +83,7 @@ request.interceptors.response.use(
       ElMessage.error('网络异常，请检查网络连接')
     }
 
-    return Promise.reject(error)
+    return Promise.reject(new HandledError(error.response?.data?.message || '请求失败'))
   }
 )
 

@@ -11,7 +11,6 @@
           v-model="workflow.name"
           placeholder="工作流名称"
           class="workflow-name-input"
-          @blur="autoSave"
         />
       </div>
       <div class="toolbar-center">
@@ -32,41 +31,6 @@
     </div>
 
     <div class="canvas-body">
-      <!-- 左侧阶段模板面板 -->
-      <div class="stage-palette">
-        <div class="palette-header">
-          <span>阶段模板</span>
-          <el-button type="primary" size="small" text @click="refreshTemplates">
-            <Icon icon="mdi:refresh" :size="14" />
-          </el-button>
-        </div>
-        <div class="palette-search">
-          <el-input v-model="templateSearch" placeholder="搜索" clearable size="small">
-            <template #prefix>
-              <Icon icon="mdi:magnify" :size="14" />
-            </template>
-          </el-input>
-        </div>
-        <div class="palette-list">
-          <div
-            v-for="tpl in filteredTemplates"
-            :key="tpl.id"
-            class="palette-item"
-            draggable="true"
-            @dragstart="onTemplateDragStart($event, tpl)"
-          >
-            <Icon icon="mdi:view-column-outline" :size="16" />
-            <div class="palette-item-info">
-              <span class="palette-item-name">{{ tpl.name }}</span>
-              <span class="palette-item-meta">{{ tpl.tasks.length }} 个任务</span>
-            </div>
-          </div>
-          <div v-if="filteredTemplates.length === 0" class="palette-empty">
-            暂无模板，请先在阶段管理中创建
-          </div>
-        </div>
-      </div>
-
       <!-- 画布区域 -->
       <div class="canvas-area" ref="canvasArea">
         <div class="canvas-columns">
@@ -82,7 +46,6 @@
                 v-model="group.name"
                 placeholder="阶段组名称"
                 class="column-name-input"
-                @blur="autoSave"
               />
               <div class="column-actions">
                 <el-dropdown trigger="click">
@@ -151,6 +114,46 @@
           </div>
         </div>
       </div>
+
+      <!-- 右侧阶段模板面板 -->
+      <div class="stage-palette" :class="{ collapsed: paletteCollapsed }">
+        <div class="palette-toggle" @click="paletteCollapsed = !paletteCollapsed">
+          <Icon :icon="paletteCollapsed ? 'mdi:chevron-left' : 'mdi:chevron-right'" :size="16" />
+        </div>
+        <template v-if="!paletteCollapsed">
+          <div class="palette-header">
+            <span>阶段模板</span>
+            <el-button type="primary" size="small" text @click="refreshTemplates">
+              <Icon icon="mdi:refresh" :size="14" />
+            </el-button>
+          </div>
+          <div class="palette-search">
+            <el-input v-model="templateSearch" placeholder="搜索" clearable size="small">
+              <template #prefix>
+                <Icon icon="mdi:magnify" :size="14" />
+              </template>
+            </el-input>
+          </div>
+          <div class="palette-list">
+            <div
+              v-for="tpl in filteredTemplates"
+              :key="tpl.id"
+              class="palette-item"
+              draggable="true"
+              @dragstart="onTemplateDragStart($event, tpl)"
+            >
+              <Icon icon="mdi:view-column-outline" :size="16" />
+              <div class="palette-item-info">
+                <span class="palette-item-name">{{ tpl.name }}</span>
+                <span class="palette-item-meta">{{ tpl.version }}</span>
+              </div>
+            </div>
+            <div v-if="filteredTemplates.length === 0" class="palette-empty">
+              暂无模板，请先在阶段管理中创建
+            </div>
+          </div>
+        </template>
+      </div>
     </div>
 
     <!-- 变量对话框 -->
@@ -206,36 +209,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Icon } from '@iconify/vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import draggable from 'vuedraggable'
 import { getWorkflowApi, updateWorkflowApi, executeWorkflowApi } from '@/api/workflow'
 import { getMachineGroupsApi, type MachineGroup } from '@/api/machineGroup'
+import { getStageTemplatesApi, type StageTemplate as StageTemplateApi } from '@/api/stageTemplate'
 import type { WorkflowStageGroup, WorkflowStage, WorkflowTask } from '@/types/workflow'
-
-const STORAGE_KEY = 'orbit_stage_templates'
-
-interface StageTemplate {
-  id: string
-  name: string
-  description: string
-  machine_group_id: number
-  machine_group_name: string
-  tasks: {
-    name: string
-    module: string
-    params: string
-    timeout: number
-    retries: number
-    delay: number
-    when: string
-    hook_ids: string
-    register: string
-    ignore_errors: boolean
-  }[]
-}
 
 const route = useRoute()
 const router = useRouter()
@@ -265,8 +247,9 @@ const newStage = ref({
 })
 
 const addStageGroupIndex = ref(0)
+const paletteCollapsed = ref(false)
 
-let templates = ref<StageTemplate[]>([])
+let templates = ref<StageTemplateApi[]>([])
 
 const filteredTemplates = computed(() => {
   if (!templateSearch.value) return templates.value
@@ -274,10 +257,9 @@ const filteredTemplates = computed(() => {
   return templates.value.filter((t) => t.name.toLowerCase().includes(kw))
 })
 
-function loadTemplates() {
+async function loadTemplates() {
   try {
-    const data = localStorage.getItem(STORAGE_KEY)
-    templates.value = data ? JSON.parse(data) : []
+    templates.value = await getStageTemplatesApi()
   } catch {
     templates.value = []
   }
@@ -288,7 +270,7 @@ function refreshTemplates() {
   ElMessage.success('已刷新')
 }
 
-function onTemplateDragStart(e: DragEvent, tpl: StageTemplate) {
+function onTemplateDragStart(e: DragEvent, tpl: StageTemplateApi) {
   e.dataTransfer?.setData('application/json', JSON.stringify(tpl))
   e.dataTransfer!.effectAllowed = 'copy'
 }
@@ -297,18 +279,25 @@ function onDropToGroup(e: DragEvent, groupIndex: number) {
   const data = e.dataTransfer?.getData('application/json')
   if (!data) return
   try {
-    const tpl: StageTemplate = JSON.parse(data)
+    const tpl: StageTemplateApi = JSON.parse(data)
+    // tasks 是 JSON 字符串，需要解析
+    let rawTasks: any[] = []
+    try {
+      rawTasks = JSON.parse(tpl.tasks || '[]')
+    } catch {
+      rawTasks = []
+    }
     const stage: WorkflowStage = {
       name: tpl.name,
       description: tpl.description,
       order: workflow.value.stage_groups[groupIndex].stages.length + 1,
       machine_group_id: tpl.machine_group_id,
-      machine_group_name: tpl.machine_group_name,
-      tasks: tpl.tasks.map((t, i) => ({
+      machine_group_name: '',
+      tasks: rawTasks.map((t: any, i: number) => ({
         ref: 0,
-        name: t.name,
-        module: t.module,
-        params: t.params,
+        name: t.name || '',
+        module: t.module || 'shell',
+        params: typeof t.params === 'object' ? JSON.stringify(t.params) : (t.params || ''),
         order: i + 1,
         when: t.when || '',
         hook_ids: t.hook_ids || '',
@@ -321,14 +310,13 @@ function onDropToGroup(e: DragEvent, groupIndex: number) {
       })),
     }
     workflow.value.stage_groups[groupIndex].stages.push(stage)
-    autoSave()
   } catch {
     // ignore
   }
 }
 
 function onStageReorder(groupIndex: number) {
-  autoSave()
+  // 手动保存，不自动保存
 }
 
 function addGroup() {
@@ -339,23 +327,19 @@ function addGroup() {
     mode: 'sequential',
     stages: [],
   })
-  autoSave()
 }
 
 function removeGroup(index: number) {
   workflow.value.stage_groups.splice(index, 1)
-  autoSave()
 }
 
 function toggleGroupMode(index: number) {
   const group = workflow.value.stage_groups[index]
   group.mode = group.mode === 'sequential' ? 'parallel' : 'sequential'
-  autoSave()
 }
 
 function removeStage(groupIndex: number, stageIndex: number) {
   workflow.value.stage_groups[groupIndex].stages.splice(stageIndex, 1)
-  autoSave()
 }
 
 function showAddStageDialog(groupIndex: number) {
@@ -379,21 +363,11 @@ function confirmAddStage() {
     tasks: [],
   })
   showAddStage.value = false
-  autoSave()
 }
 
-let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
-
-function autoSave() {
-  if (autoSaveTimer) clearTimeout(autoSaveTimer)
-  autoSaveTimer = setTimeout(() => {
-    handleSave(true)
-  }, 2000)
-}
-
-async function handleSave(silent = false) {
+async function handleSave() {
   if (!workflow.value.name) {
-    if (!silent) ElMessage.warning('请输入工作流名称')
+    ElMessage.warning('请输入工作流名称')
     return
   }
 
@@ -443,9 +417,9 @@ async function handleSave(silent = false) {
 
     await updateWorkflowApi(workflowId.value, payload)
     lastSaved.value = new Date().toLocaleTimeString()
-    if (!silent) ElMessage.success('保存成功')
+    ElMessage.success('保存成功')
   } catch (e: any) {
-    if (!silent) ElMessage.error(e?.message || '保存失败')
+    ElMessage.error(e?.message || '保存失败')
   } finally {
     saving.value = false
   }
@@ -578,10 +552,45 @@ onMounted(() => {
 .stage-palette {
   width: 220px;
   background: var(--el-bg-color);
-  border-right: 1px solid var(--el-border-color-lighter);
+  border-left: 1px solid var(--el-border-color-lighter);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
+  position: relative;
+  transition: width 0.2s;
+}
+
+.stage-palette.collapsed {
+  width: 36px;
+}
+
+.palette-toggle {
+  position: absolute;
+  left: -1px;
+  top: 50%;
+  transform: translate(-100%, -50%);
+  width: 24px;
+  height: 48px;
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color-lighter);
+  border-right: none;
+  border-radius: 6px 0 0 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 10;
+  transition: background 0.15s;
+}
+
+.palette-toggle:hover {
+  background: var(--el-fill-color-light);
+}
+
+.stage-palette.collapsed .palette-toggle {
+  left: 0;
+  transform: translateY(-50%);
+  border-radius: 6px 0 0 6px;
 }
 
 .palette-header {

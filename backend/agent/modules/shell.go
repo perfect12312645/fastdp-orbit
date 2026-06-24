@@ -75,21 +75,12 @@ func (m *ShellModule) Run(req *agent.ExecRequest) (*agent.ExecResponse, error) {
 
 	logger.Info("命令执行成功", zap.String("output", outputStr))
 
-	// 返回成功响应
-	changedDetails := ""
-	if fullCmd != "" {
-		changedDetails = "执行命令: " + fullCmd
-	} else {
-		changedDetails = "执行脚本"
-	}
-
 	return &agent.ExecResponse{
-		MachineId:      req.MachineId,
-		TaskId:         req.TaskId,
-		Success:        true,
-		Stdout:         outputStr,
-		Changed:        true,
-		ChangedDetails: changedDetails,
+		MachineId: req.MachineId,
+		TaskId:    req.TaskId,
+		Success:   true,
+		Stdout:    outputStr,
+		Changed:   true,
 	}, nil
 }
 

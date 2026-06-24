@@ -178,9 +178,12 @@ type WorkflowTaskExecution struct {
 	TaskID            uint                   `json:"task_id" gorm:"index;not null"`
 	Task              *WorkflowTask          `json:"task,omitempty" gorm:"foreignKey:TaskID"`
 	Host              string                 `json:"host" gorm:"size:100"`                       // 目标机器 ip:port
-	Status            string                 `json:"status" gorm:"size:20;default:pending"`       // pending/running/success/failed
+	Status            string                 `json:"status" gorm:"size:20;default:pending"`       // pending/running/success/failed/skipped
 	Output            string                 `json:"output" gorm:"type:text"`                     // 标准输出
+	Stderr            string                 `json:"stderr" gorm:"type:text"`                     // 标准错误（非致命警告）
 	Error             string                 `json:"error" gorm:"type:text"`                      // 错误信息
+	ErrorCode         int32                  `json:"error_code"`                                  // 错误码
+	Changed           bool                   `json:"changed"`                                     // 是否产生变更
 	DurationMs        int64                  `json:"duration_ms"`                                 // 执行耗时（毫秒）
 	StartedAt         *time.Time             `json:"started_at"`
 	FinishedAt        *time.Time             `json:"finished_at"`

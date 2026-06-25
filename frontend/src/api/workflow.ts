@@ -21,8 +21,8 @@ export function createWorkflowApi(data: CreateWorkflowRequest): Promise<Workflow
 }
 
 /** 更新工作流 */
-export function updateWorkflowApi(id: number, data: CreateWorkflowRequest): Promise<void> {
-  return request.put(`/workflows/${id}`, data).then((res) => res.data)
+export function updateWorkflowApi(id: number, data: CreateWorkflowRequest): Promise<Workflow> {
+  return request.put(`/workflows/${id}`, data).then((res) => res.data.data)
 }
 
 /** 删除工作流 */

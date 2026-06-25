@@ -28,7 +28,6 @@ func InitialMigration(db *gorm.DB) error {
 		&workflow.WorkflowStageGroup{},
 		&workflow.WorkflowStage{},
 		&workflow.WorkflowTask{},
-		&workflow.WorkflowVariable{},
 		&workflow.WorkflowHook{},
 		// Workflow - 执行层
 		&workflow.WorkflowExecution{},
@@ -38,6 +37,10 @@ func InitialMigration(db *gorm.DB) error {
 		// Stage Templates
 		&workflow.StageTemplate{},
 		&workflow.StageTemplateVersion{},
+		// Global Variables
+		&workflow.GlobalVariable{},
+		// Hook Templates
+		&workflow.HookTemplate{},
 	)
 	if err != nil {
 		return err

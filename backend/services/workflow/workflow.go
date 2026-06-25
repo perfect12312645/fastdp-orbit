@@ -37,12 +37,11 @@ func (s *Service) ListWorkflows() ([]workflow.Workflow, error) {
 	return wfs, nil
 }
 
-// GetWorkflow 获取工作流详情（含 stage_groups、stages、tasks、variables、hooks）
+// GetWorkflow 获取工作流详情（含 stage_groups、stages、tasks、hooks）
 func (s *Service) GetWorkflow(id uint) (*workflow.Workflow, error) {
 	var wf workflow.Workflow
 	if err := s.db.
 		Preload("StageGroups.Stages.Tasks").
-		Preload("Variables").
 		Preload("Hooks").
 		First(&wf, id).Error; err != nil {
 		return nil, err
@@ -54,7 +53,7 @@ func (s *Service) GetWorkflow(id uint) (*workflow.Workflow, error) {
 func (s *Service) CreateWorkflow(wf *workflow.Workflow) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		// 创建 workflow（跳过自动创建子关联）
-		if err := tx.Omit("StageGroups", "Variables", "Hooks").Create(wf).Error; err != nil {
+		if err := tx.Omit("StageGroups", "Hooks").Create(wf).Error; err != nil {
 			return err
 		}
 
@@ -79,15 +78,6 @@ func (s *Service) CreateWorkflow(wf *workflow.Workflow) error {
 				}
 			}
 		}
-
-		// 创建 variables
-		for i := range wf.Variables {
-			wf.Variables[i].WorkflowID = wf.ID
-			if err := tx.Create(&wf.Variables[i]).Error; err != nil {
-				return err
-			}
-		}
-
 		// 创建 hooks
 		for i := range wf.Hooks {
 			wf.Hooks[i].WorkflowID = wf.ID
@@ -112,7 +102,6 @@ func (s *Service) UpdateWorkflow(id uint, wf *workflow.Workflow) error {
 		// 更新基本字段
 		existing.Name = wf.Name
 		existing.Description = wf.Description
-		existing.Config = wf.Config
 		if err := tx.Save(&existing).Error; err != nil {
 			return err
 		}
@@ -132,9 +121,6 @@ func (s *Service) UpdateWorkflow(id uint, wf *workflow.Workflow) error {
 			// 删除 stage_groups
 			tx.Where("id IN ?", oldGroupIDs).Delete(&workflow.WorkflowStageGroup{})
 		}
-
-		// 删除旧的 variables
-		tx.Where("workflow_id = ?", id).Delete(&workflow.WorkflowVariable{})
 
 		// 删除旧的 hooks
 		tx.Where("workflow_id = ?", id).Delete(&workflow.WorkflowHook{})
@@ -161,16 +147,6 @@ func (s *Service) UpdateWorkflow(id uint, wf *workflow.Workflow) error {
 				}
 			}
 		}
-
-		// 创建新的 variables
-		for i := range wf.Variables {
-			wf.Variables[i].WorkflowID = id
-			wf.Variables[i].ID = 0
-			if err := tx.Create(&wf.Variables[i]).Error; err != nil {
-				return err
-			}
-		}
-
 		// 创建新的 hooks
 		for i := range wf.Hooks {
 			wf.Hooks[i].WorkflowID = id
@@ -228,9 +204,6 @@ func (s *Service) DeleteWorkflow(id uint) error {
 		// 删除 stage_groups
 		tx.Where("workflow_id = ?", id).Delete(&workflow.WorkflowStageGroup{})
 
-		// 删除 variables
-		tx.Where("workflow_id = ?", id).Delete(&workflow.WorkflowVariable{})
-
 		// 删除 hooks
 		tx.Where("workflow_id = ?", id).Delete(&workflow.WorkflowHook{})
 
@@ -260,6 +233,17 @@ func (s *Service) GetExecution(executionID uint) (*workflow.WorkflowExecution, e
 		return nil, err
 	}
 	return &exec, nil
+}
+
+// HasRunningExecutions 检查工作流是否有运行中的执行
+func (s *Service) HasRunningExecutions(workflowID uint) (bool, error) {
+	var count int64
+	if err := s.db.Model(&workflow.WorkflowExecution{}).
+		Where("workflow_id = ? AND status IN ?", workflowID, []string{"running", "paused"}).
+		Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
 
 // ValidateWorkflow 校验工作流定义
@@ -337,21 +321,18 @@ func (s *Service) ValidateWorkflow(wf *workflow.Workflow) error {
 	}
 
 	// 校验 Hook
-	hookRefSet := make(map[int]bool)
+	hookNameSet := make(map[string]bool)
 	for _, hook := range wf.Hooks {
 		if hook.Name == "" {
-			return fmt.Errorf("钩子引用ID %d 名称不能为空", hook.Ref)
+			return fmt.Errorf("钩子名称不能为空")
 		}
 		if hook.Module == "" {
 			return fmt.Errorf("钩子 [%s] 模块类型不能为空", hook.Name)
 		}
-		if hook.Ref == 0 {
-			return fmt.Errorf("钩子 [%s] 引用ID不能为空", hook.Name)
+		if hookNameSet[hook.Name] {
+			return fmt.Errorf("钩子名称 [%s] 重复", hook.Name)
 		}
-		if hookRefSet[hook.Ref] {
-			return fmt.Errorf("钩子引用ID %d 重复", hook.Ref)
-		}
-		hookRefSet[hook.Ref] = true
+		hookNameSet[hook.Name] = true
 	}
 
 	return nil
@@ -565,4 +546,61 @@ func (s *Service) RollbackStageTemplate(templateID uint, targetVersion string) e
 			},
 		).Error
 	})
+}
+
+// ==================== GlobalVariable ====================
+
+// ListGlobalVariables 获取所有全局变量
+func (s *Service) ListGlobalVariables() ([]workflow.GlobalVariable, error) {
+	var vars []workflow.GlobalVariable
+	if err := s.db.Order("`group` ASC, `key` ASC").Find(&vars).Error; err != nil {
+		return nil, err
+	}
+	return vars, nil
+}
+
+// GetGlobalVariable 获取全局变量详情
+func (s *Service) GetGlobalVariable(id uint) (*workflow.GlobalVariable, error) {
+	var v workflow.GlobalVariable
+	if err := s.db.First(&v, id).Error; err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+// CreateGlobalVariable 创建全局变量
+func (s *Service) CreateGlobalVariable(v *workflow.GlobalVariable) error {
+	// 检查变量名唯一性
+	var count int64
+	if err := s.db.Model(&workflow.GlobalVariable{}).Where("key = ?", v.Key).Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return fmt.Errorf("变量名「%s」已存在", v.Key)
+	}
+	if v.Value == "" {
+		return fmt.Errorf("变量值不能为空")
+	}
+	return s.db.Create(v).Error
+}
+
+// UpdateGlobalVariable 更新全局变量
+func (s *Service) UpdateGlobalVariable(id uint, v *workflow.GlobalVariable) error {
+	// 检查变量名唯一性（排除自身）
+	var count int64
+	if err := s.db.Model(&workflow.GlobalVariable{}).Where("key = ? AND id != ?", v.Key, id).Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return fmt.Errorf("变量名「%s」已存在", v.Key)
+	}
+	if v.Value == "" {
+		return fmt.Errorf("变量值不能为空")
+	}
+	return s.db.Model(&workflow.GlobalVariable{}).Where("id = ?", id).Updates(v).Error
+}
+
+// DeleteGlobalVariable 删除全局变量
+func (s *Service) DeleteGlobalVariable(id uint) error {
+	return s.db.Delete(&workflow.GlobalVariable{}, id).Error
 }

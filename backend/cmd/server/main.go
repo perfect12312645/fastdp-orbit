@@ -105,6 +105,9 @@ func main() {
 	eng := orchestrator.NewOrchestrator(db, agentConnPool)
 	views.Orchestrator = eng
 
+	// 设置 SSE 事件监听器
+	eng.SetEventListener(&views.SSEListener{})
+
 	// 打印启动信息
 	fmt.Println("╔════════════════════════════════════════════════╗")
 	fmt.Printf("║          Orbit Server %-24s║\n", version.Version)

@@ -130,6 +130,13 @@
                     <div class="task-error" v-if="te.error">
                       <pre>{{ te.error }}</pre>
                     </div>
+                    <div class="task-hook-status" v-if="te.hook_status && te.hook_status !== 'none'">
+                      <span class="hook-label">钩子:</span>
+                      <el-tag :type="te.hook_status === 'success' ? 'success' : te.hook_status === 'failed' ? 'danger' : 'warning'" size="small">
+                        {{ te.hook_status === 'success' ? '成功' : te.hook_status === 'failed' ? '失败' : '执行中' }}
+                      </el-tag>
+                      <span class="hook-error" v-if="te.hook_error">{{ te.hook_error }}</span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -164,6 +171,7 @@ const router = useRouter()
 const loading = ref(false)
 const execution = ref<WorkflowExecution | null>(null)
 let refreshTimer: ReturnType<typeof setInterval> | null = null
+let eventSource: EventSource | null = null
 
 const workflowId = computed(() => Number(route.params.id))
 const executionId = computed(() => Number(route.params.eid))
@@ -187,14 +195,67 @@ async function loadExecution() {
   }
 }
 
+function connectSSE() {
+  disconnectSSE()
+  const url = `/api/v1/executions/${executionId.value}/stream`
+  eventSource = new EventSource(url)
+  eventSource.addEventListener('connected', () => {
+    console.log('[SSE] connected to execution', executionId.value)
+  })
+  eventSource.addEventListener('execution_status', (e) => {
+    const data = JSON.parse(e.data)
+    if (execution.value && execution.value.id === data.execution_id) {
+      execution.value = { ...execution.value, status: data.status, error: data.error || execution.value.error }
+    }
+  })
+  eventSource.addEventListener('group_status', (e) => {
+    const data = JSON.parse(e.data)
+    if (!execution.value || execution.value.id !== data.execution_id) return
+    const groups = execution.value.stage_group_executions || []
+    const idx = groups.findIndex(g => g.group_id === data.group_id)
+    if (idx >= 0) {
+      const updated = [...groups]
+      updated[idx] = { ...updated[idx], status: data.status }
+      execution.value = { ...execution.value, stage_group_executions: updated }
+    }
+  })
+  eventSource.addEventListener('stage_status', (e) => {
+    const data = JSON.parse(e.data)
+    if (!execution.value || execution.value.id !== data.execution_id) return
+    const groups = execution.value.stage_group_executions || []
+    for (let gi = 0; gi < groups.length; gi++) {
+      const stages = groups[gi].stage_executions || []
+      const si = stages.findIndex(s => s.stage_id === data.stage_id)
+      if (si >= 0) {
+        const updatedGroups = [...groups]
+        const updatedStages = [...stages]
+        updatedStages[si] = { ...updatedStages[si], status: data.status }
+        updatedGroups[gi] = { ...updatedGroups[gi], stage_executions: updatedStages }
+        execution.value = { ...execution.value, stage_group_executions: updatedGroups }
+        return
+      }
+    }
+  })
+  eventSource.onerror = () => {
+    if (eventSource?.readyState === EventSource.CLOSED) {
+      console.warn('[SSE] connection closed, falling back to polling')
+      disconnectSSE()
+      startAutoRefresh()
+    }
+  }
+}
+
+function disconnectSSE() {
+  if (eventSource) {
+    eventSource.close()
+    eventSource = null
+  }
+}
+
 function startAutoRefresh() {
   stopAutoRefresh()
   refreshTimer = setInterval(() => {
-    if (isRunning.value) {
-      loadExecution()
-    } else {
-      stopAutoRefresh()
-    }
+    loadExecution()
   }, 3000)
 }
 
@@ -214,7 +275,7 @@ async function handlePause() {
     })
     await pauseExecutionApi(workflowId.value, executionId.value)
     ElMessage.success('已暂停')
-    loadExecution()
+    await loadExecution()
   } catch (e) {
     if (e !== 'cancel') ElMessage.error('暂停失败')
   }
@@ -224,8 +285,8 @@ async function handleResume() {
   try {
     await resumeExecutionApi(workflowId.value, executionId.value)
     ElMessage.success('已恢复')
-    loadExecution()
-    startAutoRefresh()
+    await loadExecution()
+    connectSSE()
   } catch (e) {
     ElMessage.error('恢复失败')
   }
@@ -240,7 +301,9 @@ async function handleCancel() {
     })
     await cancelExecutionApi(workflowId.value, executionId.value)
     ElMessage.success('已终止')
-    loadExecution()
+    await loadExecution()
+    disconnectSSE()
+    startAutoRefresh()
   } catch (e) {
     if (e !== 'cancel') ElMessage.error('终止失败')
   }
@@ -255,8 +318,8 @@ async function handleRetryExecution() {
     })
     await retryExecutionApi(workflowId.value, executionId.value)
     ElMessage.success('已重新触发执行')
-    loadExecution()
-    startAutoRefresh()
+    await loadExecution()
+    connectSSE()
   } catch (e) {
     if (e !== 'cancel') ElMessage.error('重新执行失败')
   }
@@ -266,8 +329,8 @@ async function handleRetryStage(stageId: number) {
   try {
     await retryStageApi(workflowId.value, executionId.value, stageId)
     ElMessage.success('已重试该阶段')
-    loadExecution()
-    startAutoRefresh()
+    await loadExecution()
+    connectSSE()
   } catch (e) {
     ElMessage.error('重试失败')
   }
@@ -326,11 +389,18 @@ function getTaskIcon(status: string) {
 
 onMounted(() => {
   loadExecution().then(() => {
-    if (isRunning.value) startAutoRefresh()
+    if (isRunning.value) {
+      connectSSE()
+    } else {
+      startAutoRefresh()
+    }
   })
 })
 
-onUnmounted(stopAutoRefresh)
+onUnmounted(() => {
+  disconnectSSE()
+  stopAutoRefresh()
+})
 </script>
 
 <style scoped>
@@ -496,6 +566,27 @@ onUnmounted(stopAutoRefresh)
   margin: 0;
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+.task-hook-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.hook-label {
+  color: var(--el-text-color-secondary);
+  flex-shrink: 0;
+}
+
+.hook-error {
+  color: var(--el-color-danger);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .subtasks-container {

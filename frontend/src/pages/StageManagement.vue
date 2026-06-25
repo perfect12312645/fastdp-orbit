@@ -118,6 +118,7 @@
                 <el-col :span="12">
                   <el-form-item label="目标分组" prop="machine_group_id">
                     <el-select
+                      v-if="machineGroups.length > 0"
                       v-model="formData.machine_group_id"
                       placeholder="选择机器分组"
                       filterable
@@ -136,6 +137,10 @@
                         </span>
                       </el-option>
                     </el-select>
+                    <div v-else class="empty-group-hint">
+                      <span>暂无机器分组，请先</span>
+                      <router-link to="/node" class="group-nav-link">创建机器分组</router-link>
+                    </div>
                   </el-form-item>
                 </el-col>
               </el-row>
@@ -255,6 +260,12 @@
                               :placeholder="getParamPlaceholder(task.module, key)"
                               class="params-kv-value"
                             />
+                            <div class="params-kv-actions">
+                              <VariablePicker
+                                button-type="primary"
+                                @select="(expr: string) => { task.params[key] += expr }"
+                              />
+                            </div>
                           </div>
                           <div v-if="Object.keys(task.params).length === 0" class="params-empty">
                             请先选择模块类型
@@ -264,12 +275,66 @@
                     </div>
 
                     <el-form-item label="执行条件" class="task-field">
-                      <el-input v-model="task.when" placeholder='如: {{.machine.os_name}} !contains ubuntu' style="width: 100%" />
+                      <div class="when-builder">
+                        <div class="when-row">
+                          <VariablePicker
+                            button-type="primary"
+                            @select="(expr: string) => { getWhenClause(task, ti).left = expr; updateWhenFromClause(task, ti) }"
+                          />
+                          <el-input
+                            :model-value="getWhenClause(task, ti).left"
+                            @update:model-value="(v: string) => { getWhenClause(task, ti).left = v; updateWhenFromClause(task, ti) }"
+                            placeholder="选择或输入变量"
+                            class="when-left"
+                            size="small"
+                          />
+                          <el-select
+                            :model-value="getWhenClause(task, ti).operator"
+                            @update:model-value="(v: string) => { getWhenClause(task, ti).operator = v; updateWhenFromClause(task, ti) }"
+                            size="small"
+                            class="when-operator"
+                          >
+                            <el-option
+                              v-for="op in WHEN_OPERATORS"
+                              :key="op.value"
+                              :label="op.label"
+                              :value="op.value"
+                            />
+                          </el-select>
+                          <el-input
+                            :model-value="getWhenClause(task, ti).right"
+                            @update:model-value="(v: string) => { getWhenClause(task, ti).right = v; updateWhenFromClause(task, ti) }"
+                            placeholder="值"
+                            class="when-right"
+                            size="small"
+                          />
+                          <VariablePicker
+                            button-type="primary"
+                            @select="(expr: string) => { getWhenClause(task, ti).right += expr; updateWhenFromClause(task, ti) }"
+                          />
+                        </div>
+                      </div>
                     </el-form-item>
                     <el-row :gutter="16">
                       <el-col :span="8">
                         <el-form-item label="后置钩子" class="task-field">
-                          <el-input v-model="task.hook_ids" placeholder='如: [1, 3]' />
+                          <el-select
+                            v-model="task.hook_ids_array"
+                            multiple
+                            placeholder="选择钩子模板"
+                            style="width: 100%"
+                            filterable
+                          >
+                            <el-option
+                              v-for="ht in hookTemplates"
+                              :key="ht.id"
+                              :label="ht.name"
+                              :value="ht.name"
+                            >
+                              <span>{{ ht.name }}</span>
+                              <span style="float: right; color: var(--el-text-color-secondary); font-size: 12px">{{ ht.module }}</span>
+                            </el-option>
+                          </el-select>
                         </el-form-item>
                       </el-col>
                       <el-col :span="8">
@@ -465,7 +530,12 @@ import {
   type StageTemplate,
   type StageTemplateVersion,
 } from '@/api/stageTemplate'
+import {
+  getHookTemplatesApi,
+  type HookTemplate,
+} from '@/api/hookTemplate'
 import { HandledError } from '@/utils/request'
+import VariablePicker from '@/components/VariablePicker.vue'
 
 interface StageTask {
   ref: number
@@ -478,6 +548,7 @@ interface StageTask {
   delay: number
   when: string
   hook_ids: string
+  hook_ids_array: string[]
   register: string
   ignore_errors: boolean
 }
@@ -510,6 +581,7 @@ const searchText = ref('')
 const stages = ref<StageTemplate[]>([])
 const machineGroups = ref<MachineGroup[]>([])
 const machineGroupLoading = ref(false)
+const hookTemplates = ref<HookTemplate[]>([])
 
 // 视图模式
 const viewMode = ref<'list' | 'edit' | 'versions'>('list')
@@ -549,6 +621,55 @@ const versionLoading = ref(false)
 const versionList = ref<StageTemplateVersion[]>([])
 const selectedVersion = ref<StageTemplateVersion | null>(null)
 
+// 执行条件结构化编辑
+const WHEN_OPERATORS = [
+  { label: '包含', value: 'contains' },
+  { label: '不包含', value: '!contains' },
+  { label: '等于', value: '==' },
+  { label: '不等于', value: '!=' },
+]
+
+interface WhenClause {
+  left: string
+  operator: string
+  right: string
+}
+
+function parseWhen(when: string): WhenClause {
+  if (!when || !when.trim()) {
+    return { left: '', operator: 'contains', right: '' }
+  }
+  // 尝试解析: {{ .Machine.os_name }} contains 'ubuntu'
+  // 或旧格式: {{.machine.os_name}} contains ubuntu
+  const m = when.match(/\{\{\s*[\.\$](.+?)\s*\}\}\s*(contains|!contains|==|!=)\s*'?([^']*)'?/)
+  if (m) {
+    const varName = m[1]
+    const left = `{{ .${varName} }}`
+    return { left, operator: m[2], right: m[3] || '' }
+  }
+  // 无法解析时，把整个值放到 right
+  return { left: '', operator: 'contains', right: when }
+}
+
+function assembleWhen(clause: WhenClause): string {
+  if (!clause.left && !clause.right) return ''
+  if (!clause.left) return ''
+  return `${clause.left} ${clause.operator} ${clause.right}`
+}
+
+const whenClauses = ref<Record<number, WhenClause>>({})
+
+function getWhenClause(task: StageTask, ti: number): WhenClause {
+  if (!(ti in whenClauses.value)) {
+    whenClauses.value[ti] = parseWhen(task.when)
+  }
+  return whenClauses.value[ti]
+}
+
+function updateWhenFromClause(task: StageTask, ti: number) {
+  task.when = assembleWhen(whenClauses.value[ti])
+}
+
 const filteredStages = computed(() => {
   if (!searchText.value) return stages.value
   const kw = searchText.value.toLowerCase()
@@ -561,13 +682,11 @@ function normalizeTasks(rawTasks: any[]): StageTask[] {
   return rawTasks.map((t: any, i: number) => {
     let params: Record<string, string> = {}
     if (typeof t.params === 'object' && t.params !== null) {
-      // 新格式：直接是对象
       params = {}
       for (const [k, v] of Object.entries(t.params)) {
         params[k] = String(v ?? '')
       }
     } else if (typeof t.params === 'string' && t.params.trim()) {
-      // 旧格式：JSON 字符串，尝试解析
       try {
         const parsed = JSON.parse(t.params)
         if (typeof parsed === 'object' && parsed !== null) {
@@ -584,10 +703,23 @@ function normalizeTasks(rawTasks: any[]): StageTask[] {
     } else {
       params = { command: '' }
     }
+
+    // 解析 hook_ids JSON 数组 -> hook_ids_array（名称列表）
+    let hook_ids_array: string[] = []
+    if (t.hook_ids) {
+      try {
+        const parsed = JSON.parse(t.hook_ids)
+        if (Array.isArray(parsed)) hook_ids_array = parsed.map(String)
+      } catch {
+        hook_ids_array = []
+      }
+    }
+
     return {
       ...t,
       params,
       order: t.order || i + 1,
+      hook_ids_array,
     }
   })
 }
@@ -618,7 +750,12 @@ function formatTime(t: string): string {
 async function loadData() {
   loading.value = true
   try {
-    stages.value = await getStageTemplatesApi()
+    const [stagesData, hooksData] = await Promise.all([
+      getStageTemplatesApi(),
+      getHookTemplatesApi().catch(() => [] as HookTemplate[]),
+    ])
+    stages.value = stagesData
+    hookTemplates.value = hooksData
   } catch (e) {
     console.error(e)
   } finally {
@@ -696,6 +833,7 @@ function addTask() {
     delay: 0,
     when: '',
     hook_ids: '',
+    hook_ids_array: [],
     register: '',
     ignore_errors: false,
   })
@@ -812,11 +950,22 @@ watch(editMode, (mode) => {
   }
 })
 
+// 同步 hook_ids_array <-> hook_ids
+watch(() => formData.value.tasks, (tasks) => {
+  for (const task of tasks) {
+    if (task.hook_ids_array && task.hook_ids_array.length > 0) {
+      task.hook_ids = JSON.stringify(task.hook_ids_array)
+    } else {
+      task.hook_ids = ''
+    }
+  }
+}, { deep: true })
+
 // ==================== 保存 ====================
 
-function handleSave() {
+async function handleSave() {
   try {
-    formRef.value?.validate()
+    await formRef.value?.validate()
   } catch {
     return
   }
@@ -924,7 +1073,7 @@ function selectVersion(version: StageTemplateVersion) {
 async function handleUpdateToVersion(version: StageTemplateVersion) {
   try {
     await ElMessageBox.confirm(
-      `确定要更新到版本 ${version.version} 吗？\n\n当前版本将被保存为历史版本，系统会生成一个新的当前版本。`,
+      `确定要更新到版本 ${version.version} 吗？`,
       '更新确认',
       { confirmButtonText: '确定更新', cancelButtonText: '取消', type: 'warning' }
     )
@@ -1235,6 +1384,27 @@ onMounted(loadData)
   border-radius: 8px;
 }
 
+.empty-group-hint {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  background: var(--el-fill-color-lighter);
+  border: 1px dashed var(--el-border-color);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+}
+
+.group-nav-link {
+  color: var(--el-color-primary);
+  text-decoration: none;
+  font-weight: 500;
+}
+.group-nav-link:hover {
+  text-decoration: underline;
+}
+
 /* YAML 编辑器样式 */
 .yaml-editor {
   display: flex;
@@ -1486,10 +1656,67 @@ onMounted(loadData)
   font-size: 13px;
 }
 
+.params-kv-actions {
+  flex-shrink: 0;
+  padding: 2px 4px;
+  display: flex;
+  align-items: center;
+}
+
 .params-empty {
   padding: 16px;
   text-align: center;
   color: var(--el-text-color-secondary);
+  font-size: 13px;
+}
+
+/* 执行条件结构化编辑 */
+.when-builder {
+  width: 100%;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
+  padding: 10px 12px;
+  background: var(--el-fill-color-lighter);
+}
+
+.when-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.when-left {
+  flex: 1;
+}
+
+.when-left :deep(.el-input__wrapper) {
+  box-shadow: none !important;
+  border-radius: 4px;
+  background: var(--el-bg-color);
+}
+
+.when-left :deep(.el-input__inner) {
+  font-family: monospace;
+  font-size: 13px;
+}
+
+.when-operator {
+  width: 100px;
+  flex-shrink: 0;
+}
+
+.when-right {
+  flex: 1;
+}
+
+.when-right :deep(.el-input__wrapper) {
+  box-shadow: none !important;
+  border-radius: 4px;
+  background: var(--el-bg-color);
+}
+
+.when-right :deep(.el-input__inner) {
+  font-family: monospace;
   font-size: 13px;
 }
 </style>

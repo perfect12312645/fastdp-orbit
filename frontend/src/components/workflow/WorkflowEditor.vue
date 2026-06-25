@@ -352,7 +352,6 @@ async function saveWorkflow() {
     const payload = {
       name: form.value.name,
       description: form.value.description,
-      config: '',
       stage_groups: [
         {
           name: '默认阶段组',
@@ -368,7 +367,6 @@ async function saveWorkflow() {
           })),
         },
       ],
-      variables: [],
       hooks: [],
     }
     if (isEdit.value && props.workflow) {

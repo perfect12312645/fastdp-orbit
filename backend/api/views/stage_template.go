@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"fastdp-orbit/backend/models/workflow"
 	"fastdp-orbit/backend/pkg/errs"
@@ -11,12 +12,29 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// friendlyParamError 将 Gin 参数校验错误转为用户友好的中文提示
+func friendlyParamError(err error) string {
+	msg := err.Error()
+	// 常见字段的中文映射（不需要解析 validator error 结构体）
+	switch {
+	case strings.Contains(msg, "MachineGroupID"):
+		return "请选择机器分组"
+	case strings.Contains(msg, "Name"):
+		return "请输入名称"
+	}
+	// fallback: 去掉 Go 内部错误信息细节
+	if idx := strings.Index(msg, "Error:"); idx >= 0 {
+		msg = strings.TrimSpace(msg[:idx])
+	}
+	return msg
+}
+
 // ==================== 请求结构 ====================
 
 type CreateStageTemplateRequest struct {
 	Name           string `json:"name" binding:"required"`
 	Description    string `json:"description"`
-	MachineGroupID uint   `json:"machine_group_id"`
+	MachineGroupID uint   `json:"machine_group_id" binding:"required"`
 	Tasks          string `json:"tasks"`
 	ChangeNote     string `json:"change_note"`
 }
@@ -24,7 +42,7 @@ type CreateStageTemplateRequest struct {
 type UpdateStageTemplateRequest struct {
 	Name           string `json:"name" binding:"required"`
 	Description    string `json:"description"`
-	MachineGroupID uint   `json:"machine_group_id"`
+	MachineGroupID uint   `json:"machine_group_id" binding:"required"`
 	Tasks          string `json:"tasks"`
 	ChangeNote     string `json:"change_note" binding:"required"`
 }
@@ -72,7 +90,7 @@ func CreateStageTemplate(c *gin.Context) {
 
 	var req CreateStageTemplateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": errs.CodeParamInvalid, "message": "参数错误: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": errs.CodeParamInvalid, "message": friendlyParamError(err)})
 		return
 	}
 
@@ -127,7 +145,7 @@ func UpdateStageTemplate(c *gin.Context) {
 
 	var req UpdateStageTemplateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": errs.CodeParamInvalid, "message": "参数错误: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": errs.CodeParamInvalid, "message": friendlyParamError(err)})
 		return
 	}
 
@@ -207,7 +225,7 @@ func RollbackStageTemplate(c *gin.Context) {
 
 	var req RollbackStageTemplateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": errs.CodeParamInvalid, "message": "参数错误: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": errs.CodeParamInvalid, "message": friendlyParamError(err)})
 		return
 	}
 

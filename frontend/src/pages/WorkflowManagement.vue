@@ -27,34 +27,22 @@
       </div>
 
       <el-table :data="paginatedData" v-loading="loading" stripe style="width: 100%">
-        <el-table-column prop="name" label="名称" min-width="180">
+        <el-table-column prop="name" label="名称" width="120">
           <template #default="{ row }">
             <span class="link-text" @click="openCanvas(row)">{{ row.name }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="description" label="描述" min-width="200" show-overflow-tooltip />
-        <el-table-column label="阶段数" width="90" align="center">
-          <template #default="{ row }">
-            <el-tag size="small" :type="row.stage_groups?.length ? 'primary' : 'info'" effect="plain">
-              {{ row.stage_groups?.length || 0 }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" width="170">
+        <el-table-column prop="description" label="描述" min-width="120" show-overflow-tooltip />
+        <el-table-column prop="created_by" label="创建人" width="120" />
+        <el-table-column prop="created_at" label="创建时间" width="180">
           <template #default="{ row }">
             {{ formatDateTime(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="200" fixed="right">
+        <el-table-column label="操作" width="140" fixed="right">
           <template #default="{ row }">
             <el-button type="primary" link size="small" @click="openCanvas(row)">
-              <Icon icon="mdi:edit-outline" :size="14" /> 编排
-            </el-button>
-            <el-button type="success" link size="small" @click="executeWorkflow(row)">
-              <Icon icon="mdi:play" :size="14" /> 执行
-            </el-button>
-            <el-button type="primary" link size="small" @click="viewExecutions(row)">
-              <Icon icon="mdi:history" :size="14" /> 历史
+              <Icon icon="mdi:eye" :size="14" /> 查看
             </el-button>
             <el-button type="danger" link size="small" @click="deleteWorkflow(row)">
               <Icon icon="mdi:delete" :size="14" /> 删除
@@ -91,33 +79,6 @@
         </el-button>
       </template>
     </el-dialog>
-
-    <!-- 执行历史对话框 -->
-    <el-dialog v-model="showExecutions" title="执行历史" width="700px" destroy-on-close>
-      <el-table :data="executions" v-loading="loadingExecutions" stripe>
-        <el-table-column prop="id" label="ID" width="70" />
-        <el-table-column prop="status" label="状态" width="100">
-          <template #default="{ row }">
-            <el-tag :type="getStatusType(row.status)" size="small">{{ getStatusLabel(row.status) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="trigger" label="触发者" width="100" />
-        <el-table-column prop="error" label="错误信息" min-width="150" show-overflow-tooltip />
-        <el-table-column prop="started_at" label="开始时间" width="170">
-          <template #default="{ row }">{{ formatDateTime(row.started_at) }}</template>
-        </el-table-column>
-        <el-table-column prop="finished_at" label="结束时间" width="170">
-          <template #default="{ row }">{{ row.finished_at ? formatDateTime(row.finished_at) : '-' }}</template>
-        </el-table-column>
-        <el-table-column label="操作" width="100">
-          <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="viewExecutionDetail(row)">
-              <Icon icon="mdi:eye" :size="14" /> 详情
-            </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-    </el-dialog>
   </div>
 </template>
 
@@ -131,10 +92,8 @@ import {
   getWorkflowsApi,
   createWorkflowApi,
   deleteWorkflowApi,
-  executeWorkflowApi,
-  getExecutionsApi,
 } from '@/api/workflow'
-import type { Workflow, WorkflowExecution } from '@/types/workflow'
+import type { Workflow } from '@/types/workflow'
 
 const router = useRouter()
 
@@ -165,11 +124,6 @@ const createRules = {
   name: [{ required: true, message: '请输入工作流名称', trigger: 'blur' }],
 }
 
-const showExecutions = ref(false)
-const loadingExecutions = ref(false)
-const executions = ref<WorkflowExecution[]>([])
-const currentWorkflowId = ref(0)
-
 async function loadData() {
   loading.value = true
   try {
@@ -198,9 +152,7 @@ async function handleCreate() {
     const wf = await createWorkflowApi({
       name: createForm.value.name,
       description: createForm.value.description,
-      config: '',
       stage_groups: [],
-      variables: [],
       hooks: [],
     })
     showCreate.value = false
@@ -217,20 +169,6 @@ function openCanvas(row: Workflow) {
   router.push(`/workflow/${row.id}/canvas`)
 }
 
-async function executeWorkflow(row: Workflow) {
-  try {
-    await ElMessageBox.confirm(`确认执行工作流「${row.name}」？`, '执行确认', {
-      confirmButtonText: '执行',
-      cancelButtonText: '取消',
-      type: 'warning',
-    })
-    await executeWorkflowApi(row.id)
-    ElMessage.success('工作流已触发执行')
-  } catch (e) {
-    if (e !== 'cancel') ElMessage.error('执行失败')
-  }
-}
-
 async function deleteWorkflow(row: Workflow) {
   try {
     await ElMessageBox.confirm(`确认删除工作流「${row.name}」？此操作不可恢复。`, '删除确认', {
@@ -244,47 +182,6 @@ async function deleteWorkflow(row: Workflow) {
   } catch (e) {
     if (e !== 'cancel') ElMessage.error('删除失败')
   }
-}
-
-async function viewExecutions(row: Workflow) {
-  currentWorkflowId.value = row.id
-  showExecutions.value = true
-  loadingExecutions.value = true
-  try {
-    executions.value = await getExecutionsApi(row.id)
-  } catch (e) {
-    console.error(e)
-  } finally {
-    loadingExecutions.value = false
-  }
-}
-
-function viewExecutionDetail(row: WorkflowExecution) {
-  router.push(`/workflow/${currentWorkflowId.value}/executions/${row.id}`)
-}
-
-function getStatusType(status: string) {
-  const map: Record<string, string> = {
-    running: 'warning',
-    success: 'success',
-    failed: 'danger',
-    paused: 'info',
-    cancelled: 'info',
-  }
-  return (map[status] || 'info') as any
-}
-
-function getStatusLabel(status: string) {
-  const map: Record<string, string> = {
-    running: '运行中',
-    success: '成功',
-    failed: '失败',
-    paused: '已暂停',
-    cancelled: '已终止',
-    pending: '等待中',
-    skipped: '已跳过',
-  }
-  return map[status] || status
 }
 
 onMounted(loadData)

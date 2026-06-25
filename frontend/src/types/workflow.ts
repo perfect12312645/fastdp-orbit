@@ -2,12 +2,10 @@ export interface Workflow {
   id: number
   name: string
   description: string
-  config: string
   created_by: string
   created_at: string
   updated_at: string
   stage_groups: WorkflowStageGroup[]
-  variables: WorkflowVariable[]
   hooks: WorkflowHook[]
 }
 
@@ -29,6 +27,7 @@ export interface WorkflowStage {
   order: number
   machine_group_id?: number
   machine_group_name?: string
+  template_version?: string
   tasks: WorkflowTask[]
 }
 
@@ -50,27 +49,16 @@ export interface WorkflowTask {
   register: string
 }
 
-export interface WorkflowVariable {
-  id?: number
-  workflow_id?: number
-  key: string
-  type: 'string' | 'number' | 'bool'
-  value?: string
-  description?: string
-  group?: string
-}
-
 export interface WorkflowHook {
   id?: number
   workflow_id?: number
-  ref: number
   name: string
   module: string
   params: string
-  host: string
   timeout: number
-  when: string
-  loop: string
+  ignore_errors: boolean
+  retries: number
+  delay: number
 }
 
 export interface WorkflowExecution {
@@ -115,9 +103,13 @@ export interface WorkflowTaskExecution {
   task_id: number
   task?: WorkflowTask
   host: string
-  status: 'pending' | 'running' | 'success' | 'failed'
+  status: 'pending' | 'running' | 'success' | 'failed' | 'skipped'
   output: string
+  stderr: string
   error: string
+  changed: boolean
+  hook_status: string
+  hook_error: string
   duration_ms: number
   started_at: string | null
   finished_at: string | null
@@ -126,7 +118,6 @@ export interface WorkflowTaskExecution {
 export interface CreateWorkflowRequest {
   name: string
   description: string
-  config: string
   stage_groups: {
     name: string
     description: string
@@ -154,24 +145,13 @@ export interface CreateWorkflowRequest {
       }[]
     }[]
   }[]
-  variables: {
-    key: string
-    type: 'string' | 'number' | 'bool'
-    value?: string
-    description?: string
-    group?: string
-  }[]
   hooks: {
-    ref: number
     name: string
     module: string
     params: string
     timeout: number
-    when: string
-    loop: string
     ignore_errors: boolean
     retries: number
     delay: number
-    register: string
   }[]
 }

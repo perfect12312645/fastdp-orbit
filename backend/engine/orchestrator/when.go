@@ -28,7 +28,7 @@ func evaluateWhen(when string, vars map[string]interface{}) (bool, error) {
 	return evaluateExpression(rendered)
 }
 
-// renderWhenTemplate 使用 Go template 渲染 when 表达式中的变量
+// renderWhenTemplate 使用 Go template 渲染 表达式中的变量
 func renderWhenTemplate(when string, vars map[string]interface{}) (string, error) {
 	tpl, err := template.New("when").Parse(when)
 	if err != nil {

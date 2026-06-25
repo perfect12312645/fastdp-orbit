@@ -15,7 +15,6 @@ type Workflow struct {
 	ID          uint           `json:"id" gorm:"primaryKey"`
 	Name        string         `json:"name" gorm:"size:100;not null"`
 	Description string         `json:"description" gorm:"size:500"`
-	Config      string         `json:"config" gorm:"type:text"` // JSON: 全局变量等
 	CreatedBy   string         `json:"created_by" gorm:"size:50"`
 	CreatedAt   time.Time      `json:"created_at"`
 	UpdatedAt   time.Time      `json:"updated_at"`
@@ -23,7 +22,6 @@ type Workflow struct {
 
 	// 关联
 	StageGroups []WorkflowStageGroup `json:"stage_groups" gorm:"foreignKey:WorkflowID"`
-	Variables   []WorkflowVariable   `json:"variables" gorm:"foreignKey:WorkflowID"`
 	Hooks       []WorkflowHook       `json:"hooks" gorm:"foreignKey:WorkflowID"`
 }
 
@@ -44,12 +42,13 @@ type WorkflowStageGroup struct {
 
 // WorkflowStage 阶段（画布节点，内部包含多个任务）
 type WorkflowStage struct {
-	ID             uint   `json:"id" gorm:"primaryKey"`
-	StageGroupID   uint   `json:"stage_group_id" gorm:"index;not null"`
-	Name           string `json:"name" gorm:"size:100;not null"`
-	Description    string `json:"description" gorm:"size:500"`
-	Order          int    `json:"order" gorm:"not null"` // 组内顺序，从上到下
-	MachineGroupID uint   `json:"machine_group_id" gorm:"index"` // 关联机器分组，该阶段内所有任务批量执行的目标机器
+	ID               uint   `json:"id" gorm:"primaryKey"`
+	StageGroupID     uint   `json:"stage_group_id" gorm:"index;not null"`
+	Name             string `json:"name" gorm:"size:100;not null"`
+	Description      string `json:"description" gorm:"size:500"`
+	Order            int    `json:"order" gorm:"not null"` // 组内顺序，从上到下
+	MachineGroupID   uint   `json:"machine_group_id" gorm:"index"` // 关联机器分组，该阶段内所有任务批量执行的目标机器
+	TemplateVersion  string `json:"template_version" gorm:"size:20"` // 来源阶段模板版本号
 
 	// 关联（运行时加载，不持久化）
 	MachineGroup *machine.MachineGroup `json:"machine_group,omitempty" gorm:"-"`
@@ -86,31 +85,14 @@ type WorkflowTask struct {
 	Register string `json:"register" gorm:"size:100"`
 }
 
-// WorkflowVariable 工作流全局变量（用于 When 条件判断和模板引用）
-type WorkflowVariable struct {
-	ID          uint   `json:"id" gorm:"primaryKey"`
-	WorkflowID  uint   `json:"workflow_id" gorm:"index;not null"`
-	Key         string `json:"key" gorm:"size:100;not null"`          // 变量名，如 "docker_version"
-	Type        string `json:"type" gorm:"size:20;not null"`          // string/number/bool
-	Value       string `json:"value" gorm:"type:text"`                // 变量值（默认值）
-	Description string `json:"description" gorm:"size:500"`           // 变量描述
-	Group       string `json:"group" gorm:"size:100"`                 // 变量分组，如 "网络配置"、"系统设置"
-}
-
-// WorkflowHook 可复用的后置钩子（独立管理，可被多个 Task 引用）
+// WorkflowHook 工作流钩子快照（保存时从 HookTemplate 复制过来）
 type WorkflowHook struct {
 	ID         uint   `json:"id" gorm:"primaryKey"`
 	WorkflowID uint   `json:"workflow_id" gorm:"index;not null"`
-	Ref        int    `json:"ref" gorm:"not null"`               // 工作流内唯一引用ID
 	Name       string `json:"name" gorm:"size:100;not null"`
-	Module     string `json:"module" gorm:"size:50;not null"`    // 模块类型
-	Params     string `json:"params" gorm:"type:text"`           // JSON: 模块参数
-	Timeout    int    `json:"timeout" gorm:"default:0"`          // 超时（秒）
-
-	// 条件执行（Go 模板表达式）
-	When string `json:"when" gorm:"size:500"`
-	// 循环执行（JSON 数组），使用 {{.item}} 引用当前项
-	Loop string `json:"loop" gorm:"type:text"`
+	Module     string `json:"module" gorm:"size:50;not null"`
+	Params     string `json:"params" gorm:"type:text"`
+	Timeout    int    `json:"timeout" gorm:"default:0"`
 
 	// 失败时跳过，继续执行后续任务
 	IgnoreErrors bool `json:"ignore_errors" gorm:"default:false"`
@@ -118,8 +100,6 @@ type WorkflowHook struct {
 	Retries int `json:"retries" gorm:"default:0"`
 	// 重试间隔（秒）
 	Delay int `json:"delay" gorm:"default:0"`
-	// 将任务输出注册为变量名，供后续任务的 when 或 params 中引用
-	Register string `json:"register" gorm:"size:100"`
 }
 
 // ==================== 执行层 ====================
@@ -184,6 +164,8 @@ type WorkflowTaskExecution struct {
 	Error             string                 `json:"error" gorm:"type:text"`                      // 错误信息
 	ErrorCode         int32                  `json:"error_code"`                                  // 错误码
 	Changed           bool                   `json:"changed"`                                     // 是否产生变更
+	HookStatus        string                 `json:"hook_status" gorm:"size:20;default:none"`     // 钩子执行状态: none/running/success/failed
+	HookError         string                 `json:"hook_error" gorm:"type:text"`                 // 钩子失败原因
 	DurationMs        int64                  `json:"duration_ms"`                                 // 执行耗时（毫秒）
 	StartedAt         *time.Time             `json:"started_at"`
 	FinishedAt        *time.Time             `json:"finished_at"`
@@ -194,7 +176,6 @@ func (Workflow) TableName() string                    { return "workflows" }
 func (WorkflowStageGroup) TableName() string          { return "workflow_stage_groups" }
 func (WorkflowStage) TableName() string               { return "workflow_stages" }
 func (WorkflowTask) TableName() string                { return "workflow_tasks" }
-func (WorkflowVariable) TableName() string            { return "workflow_variables" }
 func (WorkflowHook) TableName() string                { return "workflow_hooks" }
 func (WorkflowExecution) TableName() string           { return "workflow_executions" }
 func (WorkflowStageGroupExecution) TableName() string { return "workflow_stage_group_executions" }

@@ -100,6 +100,26 @@ func SetupRouter(cfg *config.ServerConfig, mc *cache.MachineCache, pool *serverg
 			stageTemplates.POST("/:id/rollback", views.RollbackStageTemplate)
 		}
 
+		// Global Variables（全局变量管理）
+		globalVars := api.Group("/global-variables")
+		{
+			globalVars.GET("", views.ListGlobalVariables)
+			globalVars.POST("", views.CreateGlobalVariable)
+			globalVars.GET("/:id", views.GetGlobalVariable)
+			globalVars.PUT("/:id", views.UpdateGlobalVariable)
+			globalVars.DELETE("/:id", views.DeleteGlobalVariable)
+		}
+
+		// Hook Templates（钩子模板管理）
+		hookTemplates := api.Group("/hook-templates")
+		{
+			hookTemplates.GET("", views.ListHookTemplates)
+			hookTemplates.POST("", views.CreateHookTemplate)
+			hookTemplates.GET("/:id", views.GetHookTemplate)
+			hookTemplates.PUT("/:id", views.UpdateHookTemplate)
+			hookTemplates.DELETE("/:id", views.DeleteHookTemplate)
+		}
+
 		// Cluster management
 		clusters := api.Group("/clusters")
 		{
@@ -133,6 +153,9 @@ func SetupRouter(cfg *config.ServerConfig, mc *cache.MachineCache, pool *serverg
 
 		// WebSocket for real-time updates
 		api.GET("/ws", views.HandleWebSocket)
+
+		// SSE for execution real-time updates
+		api.GET("/executions/:id/stream", views.HandleSSE)
 
 		// Install commands
 		api.GET("/install/command", views.GetInstallCommand)

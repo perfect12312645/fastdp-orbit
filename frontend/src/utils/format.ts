@@ -5,7 +5,7 @@ import { format } from 'date-fns'
  * @param date 日期字符串或Date对象
  * @param pattern 格式化模式，默认 YYYY-MM-DD HH:mm:ss
  */
-export function formatDateTime(date: string | Date | null | undefined, pattern = 'YYYY-MM-DD HH:mm:ss'): string {
+export function formatDateTime(date: string | Date | null | undefined, pattern = 'yyyy-MM-dd HH:mm:ss'): string {
   if (!date) return '-'
   try {
     const d = typeof date === 'string' ? new Date(date) : date

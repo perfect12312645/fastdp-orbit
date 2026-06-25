@@ -77,6 +77,18 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '阶段管理', icon: 'View' },
       },
       {
+        path: 'global-variables',
+        name: 'GlobalVariableManagement',
+        component: () => import('@/pages/GlobalVariableManagement.vue'),
+        meta: { title: '全局变量', icon: 'Coin' },
+      },
+      {
+        path: 'hook-templates',
+        name: 'HookTemplateManagement',
+        component: () => import('@/pages/HookTemplateManagement.vue'),
+        meta: { title: '钩子管理', icon: 'Hook' },
+      },
+      {
         path: 'testing',
         name: 'AutoTesting',
         component: () => import('@/pages/AutoTesting.vue'),

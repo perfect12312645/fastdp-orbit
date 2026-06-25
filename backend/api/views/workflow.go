@@ -23,18 +23,14 @@ var Orchestrator *orchestrator.Orchestrator
 type CreateWorkflowRequest struct {
 	Name        string                  `json:"name" binding:"required"`
 	Description string                  `json:"description"`
-	Config      string                  `json:"config"`
 	StageGroups []CreateStageGroupInput `json:"stage_groups"`
-	Variables   []CreateVariableInput   `json:"variables"`
 	Hooks       []CreateHookInput       `json:"hooks"`
 }
 
 type UpdateWorkflowRequest struct {
 	Name        string                  `json:"name"`
 	Description string                  `json:"description"`
-	Config      string                  `json:"config"`
 	StageGroups []CreateStageGroupInput `json:"stage_groups"`
-	Variables   []CreateVariableInput   `json:"variables"`
 	Hooks       []CreateHookInput       `json:"hooks"`
 }
 
@@ -47,11 +43,12 @@ type CreateStageGroupInput struct {
 }
 
 type CreateStageInput struct {
-	Name           string            `json:"name" binding:"required"`
-	Description    string            `json:"description"`
-	Order          int               `json:"order"`
-	MachineGroupID uint              `json:"machine_group_id"`
-	Tasks          []CreateTaskInput `json:"tasks" binding:"required,min=1"`
+	Name            string            `json:"name" binding:"required"`
+	Description     string            `json:"description"`
+	Order           int               `json:"order"`
+	MachineGroupID  uint              `json:"machine_group_id"`
+	TemplateVersion string            `json:"template_version"`
+	Tasks           []CreateTaskInput `json:"tasks" binding:"required,min=1"`
 }
 
 type CreateTaskInput struct {
@@ -70,26 +67,14 @@ type CreateTaskInput struct {
 	Register     string `json:"register"`
 }
 
-type CreateVariableInput struct {
-	Key         string `json:"key" binding:"required"`
-	Type        string `json:"type" binding:"required"`
-	Value       string `json:"value"`
-	Description string `json:"description"`
-	Group       string `json:"group"`
-}
-
 type CreateHookInput struct {
-	Ref          int    `json:"ref"`
 	Name         string `json:"name" binding:"required"`
 	Module       string `json:"module" binding:"required"`
 	Params       string `json:"params"`
 	Timeout      int    `json:"timeout"`
-	When         string `json:"when"`
-	Loop         string `json:"loop"`
 	IgnoreErrors bool   `json:"ignore_errors"`
 	Retries      int    `json:"retries"`
 	Delay        int    `json:"delay"`
-	Register     string `json:"register"`
 }
 
 // ==================== Handlers ====================
@@ -129,7 +114,6 @@ func CreateWorkflow(c *gin.Context) {
 	wf := &workflow.Workflow{
 		Name:        req.Name,
 		Description: req.Description,
-		Config:      req.Config,
 	}
 
 	// 构建 StageGroups
@@ -142,10 +126,11 @@ func CreateWorkflow(c *gin.Context) {
 		}
 		for _, s := range g.Stages {
 			stage := workflow.WorkflowStage{
-				Name:           s.Name,
-				Description:    s.Description,
-				Order:          s.Order,
-				MachineGroupID: s.MachineGroupID,
+				Name:            s.Name,
+				Description:     s.Description,
+				Order:           s.Order,
+				MachineGroupID:  s.MachineGroupID,
+				TemplateVersion: s.TemplateVersion,
 			}
 			for _, t := range s.Tasks {
 				stage.Tasks = append(stage.Tasks, workflow.WorkflowTask{
@@ -169,31 +154,16 @@ func CreateWorkflow(c *gin.Context) {
 		wf.StageGroups = append(wf.StageGroups, group)
 	}
 
-	// 构建 Variables
-	for _, v := range req.Variables {
-		wf.Variables = append(wf.Variables, workflow.WorkflowVariable{
-			Key:         v.Key,
-			Type:        v.Type,
-			Value:       v.Value,
-			Description: v.Description,
-			Group:       v.Group,
-		})
-	}
-
 	// 构建 Hooks
 	for _, h := range req.Hooks {
 		wf.Hooks = append(wf.Hooks, workflow.WorkflowHook{
-			Ref:          h.Ref,
 			Name:         h.Name,
 			Module:       h.Module,
 			Params:       h.Params,
 			Timeout:      h.Timeout,
-			When:         h.When,
-			Loop:         h.Loop,
 			IgnoreErrors: h.IgnoreErrors,
 			Retries:      h.Retries,
 			Delay:        h.Delay,
-			Register:     h.Register,
 		})
 	}
 
@@ -253,10 +223,20 @@ func UpdateWorkflow(c *gin.Context) {
 		return
 	}
 
+	// 检查是否有运行中的执行
+	running, err := WorkflowService.HasRunningExecutions(uint(id))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "message": "系统内部错误"})
+		return
+	}
+	if running {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "message": "工作流正在执行中，无法编辑"})
+		return
+	}
+
 	wf := &workflow.Workflow{
 		Name:        req.Name,
 		Description: req.Description,
-		Config:      req.Config,
 	}
 
 	// 构建 StageGroups
@@ -269,10 +249,11 @@ func UpdateWorkflow(c *gin.Context) {
 		}
 		for _, s := range g.Stages {
 			stage := workflow.WorkflowStage{
-				Name:           s.Name,
-				Description:    s.Description,
-				Order:          s.Order,
-				MachineGroupID: s.MachineGroupID,
+				Name:            s.Name,
+				Description:     s.Description,
+				Order:           s.Order,
+				MachineGroupID:  s.MachineGroupID,
+				TemplateVersion: s.TemplateVersion,
 			}
 			for _, t := range s.Tasks {
 				stage.Tasks = append(stage.Tasks, workflow.WorkflowTask{
@@ -296,31 +277,16 @@ func UpdateWorkflow(c *gin.Context) {
 		wf.StageGroups = append(wf.StageGroups, group)
 	}
 
-	// 构建 Variables
-	for _, v := range req.Variables {
-		wf.Variables = append(wf.Variables, workflow.WorkflowVariable{
-			Key:         v.Key,
-			Type:        v.Type,
-			Value:       v.Value,
-			Description: v.Description,
-			Group:       v.Group,
-		})
-	}
-
 	// 构建 Hooks
 	for _, h := range req.Hooks {
 		wf.Hooks = append(wf.Hooks, workflow.WorkflowHook{
-			Ref:          h.Ref,
 			Name:         h.Name,
 			Module:       h.Module,
 			Params:       h.Params,
 			Timeout:      h.Timeout,
-			When:         h.When,
-			Loop:         h.Loop,
 			IgnoreErrors: h.IgnoreErrors,
 			Retries:      h.Retries,
 			Delay:        h.Delay,
-			Register:     h.Register,
 		})
 	}
 
@@ -335,7 +301,13 @@ func UpdateWorkflow(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"code": 0, "message": "success"})
+	// 返回更新后的工作流（含 updated_at）
+	updatedWf, err := WorkflowService.GetWorkflow(uint(id))
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"code": 0, "message": "success"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 0, "message": "success", "data": updatedWf})
 }
 
 // DeleteWorkflow 删除工作流

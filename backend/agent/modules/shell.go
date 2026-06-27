@@ -2,6 +2,7 @@ package modules
 
 import (
 	"fastdp-orbit/backend/pkg/logger"
+	"fastdp-orbit/backend/pkg/utils"
 	"fastdp-orbit/backend/proto/agent"
 	"os/exec"
 	"strings"
@@ -9,68 +10,35 @@ import (
 	"go.uber.org/zap"
 )
 
-// ShellModule 执行shell命令的模块
+// ShellModule 执行单条 shell 命令的模块
 type ShellModule struct{}
 
-// NewShellModule 创建Shell模块实例
 func NewShellModule() Module {
 	return &ShellModule{}
 }
 
-// Run 执行shell命令
-func (m *ShellModule) Run(req *agent.ExecRequest) (*agent.ExecResponse, error) {
-	// 获取命令和参数
-	scriptContent := req.Parameters["script"]
-	fullCmd := req.Parameters["command"]
+func init() {
+	Register("shell", NewShellModule)
+}
 
-	var executeContent string
-	if scriptContent != "" {
-		executeContent = scriptContent
-		logger.Info("执行多行脚本", zap.String("script", executeContent))
-	} else if fullCmd != "" {
-		executeContent = strings.ReplaceAll(fullCmd, `\"`, `"`)
-		logger.Info("执行单条命令", zap.String("command", executeContent))
-	} else {
-		logger.Error("未指定command或script参数")
-		return &agent.ExecResponse{
-			MachineId: req.MachineId,
-			TaskId:    req.TaskId,
-			Success:   false,
-			Error: &agent.ErrorDetail{
-				Code:    1000,
-				Message: "必须指定command（单条命令）或script（多行脚本）参数",
-			},
-		}, nil
+func (m *ShellModule) Run(req *agent.ExecRequest) (*agent.ExecResponse, error) {
+	cmd := req.Parameters["command"]
+	if cmd == "" {
+		return utils.ErrorResponse(req, 1000, "必须指定 command 参数"), nil
 	}
 
-	// 使用shell执行命令（支持管道等特性）
-	cmd := exec.Command("/bin/bash", "-c", executeContent)
+	cmd = strings.ReplaceAll(cmd, `\"`, `"`)
 
-	// 捕获输出
-	output, err := cmd.CombinedOutput()
+	output, err := exec.Command("/bin/bash", "-c", cmd).CombinedOutput()
 	outputStr := string(output)
 
-	// 处理执行结果
 	if err != nil {
 		logger.Error("命令执行失败", zap.Error(err), zap.String("output", outputStr))
-
-		// 获取退出码
 		exitCode := -1
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
 		}
-
-		return &agent.ExecResponse{
-			MachineId: req.MachineId,
-			TaskId:    req.TaskId,
-			Success:   false,
-			Stdout:    outputStr,
-			Error: &agent.ErrorDetail{
-				Code:    int32(exitCode),
-				Message: "命令执行失败",
-				Trace:   err.Error(),
-			},
-		}, nil
+		return utils.ErrorResponse(req, int32(exitCode), "命令执行失败"), nil
 	}
 
 	logger.Info("命令执行成功", zap.String("output", outputStr))
@@ -82,8 +50,4 @@ func (m *ShellModule) Run(req *agent.ExecRequest) (*agent.ExecResponse, error) {
 		Stdout:    outputStr,
 		Changed:   true,
 	}, nil
-}
-
-func init() {
-	Register("shell", NewShellModule)
 }

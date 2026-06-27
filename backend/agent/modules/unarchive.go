@@ -1,13 +1,15 @@
 package modules
 
 import (
-	"fastdp-orbit/backend/proto/agent"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"fastdp-orbit/backend/pkg/utils"
+	"fastdp-orbit/backend/proto/agent"
 )
 
 // UnarchiveModule 文件解压模块（自动识别格式，带重复解压检查，强制绝对路径）
@@ -110,8 +112,7 @@ func (m *UnarchiveModule) Run(req *agent.ExecRequest) (*agent.ExecResponse, erro
 	if utils.FileExists(markerFile) {
 		return utils.SuccessResponse(
 			req,
-			"文件已解压，跳过操作",
-			fmt.Sprintf("目标目录已存在标记文件[%s]，确认已解压", markerFile),
+			fmt.Sprintf("文件已解压，跳过操作（标记文件: %s）", markerFile),
 		), nil
 	}
 
@@ -166,13 +167,7 @@ func (m *UnarchiveModule) Run(req *agent.ExecRequest) (*agent.ExecResponse, erro
 		TaskId:    req.TaskId,
 		Success:   true,
 		Stdout:    output + fmt.Sprintf("\n文件[%s]（自动识别为%s格式）解压至[%s]成功，已创建标记文件", srcPath, format, destPath),
-		Stderr:    "",
 		Changed:   isChange,
-		Error: &agent.ErrorDetail{
-			Code:    0,
-			Message: "",
-			Trace:   "",
-		},
 	}, nil
 }
 

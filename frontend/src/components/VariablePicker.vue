@@ -55,10 +55,22 @@
               v-for="v in filteredMachineVars"
               :key="'mv_' + v.key"
               class="var-picker-item"
-              @click="selectVariable(`{{ .Machine.${v.key} }}`)"
+              @click="selectVariable(machineVarExpr(v.key))"
             >
               <span class="var-picker-item-name">{{ v.key }}</span>
               <span class="var-picker-item-desc">{{ v.label }}</span>
+            </div>
+            <div class="var-picker-item var-picker-item-loop" @click="selectVariable(gpuLoopExpr())">
+              <span class="var-picker-item-name">gpus</span>
+              <span class="var-picker-item-desc">GPU列表（循环）</span>
+            </div>
+            <div class="var-picker-item var-picker-item-loop" @click="selectVariable(diskLoopExpr())">
+              <span class="var-picker-item-name">disks</span>
+              <span class="var-picker-item-desc">磁盘列表（循环）</span>
+            </div>
+            <div class="var-picker-item var-picker-item-loop" @click="selectVariable(networkLoopExpr())">
+              <span class="var-picker-item-name">networks</span>
+              <span class="var-picker-item-desc">网卡列表（循环）</span>
             </div>
           </div>
         </template>
@@ -66,7 +78,7 @@
         <template v-if="filteredGroupVars.length > 0">
           <div class="var-picker-group">
             <div class="var-picker-group-title">
-              <Icon icon="mdi:server-network" :size="14" /> 分组
+              <Icon icon="mdi:server-network" :size="14" /> 当前分组
             </div>
             <div
               v-for="v in filteredGroupVars"
@@ -76,6 +88,40 @@
             >
               <span class="var-picker-item-name">{{ v.key }}</span>
               <span class="var-picker-item-desc">{{ v.label }}</span>
+            </div>
+          </div>
+        </template>
+
+        <template v-if="filteredGroupsVars.length > 0">
+          <div class="var-picker-group">
+            <div class="var-picker-group-title">
+              <Icon icon="mdi:server-network" :size="14" /> 所有分组（循环引用）
+            </div>
+            <div
+              v-for="g in filteredGroupsVars"
+              :key="'groups_' + g.name"
+              class="var-picker-item"
+              @click="selectVariable(`{{ range $index, $value := .Groups.${g.name} }}\\n  {{ $value.ip }}\\n{{ end }}`)"
+            >
+              <span class="var-picker-item-name">{{ g.name }}</span>
+              <span class="var-picker-item-desc">{{ g.count }} 台机器</span>
+            </div>
+          </div>
+        </template>
+
+        <template v-if="filteredRegisteredVars.length > 0">
+          <div class="var-picker-group">
+            <div class="var-picker-group-title">
+              <Icon icon="mdi:variable" :size="14" /> 注册参数
+            </div>
+            <div
+              v-for="v in filteredRegisteredVars"
+              :key="'rv_' + v"
+              class="var-picker-item"
+              @click="selectVariable(`{{ .Register.${v}.stdout }}`)"
+            >
+              <span class="var-picker-item-name">{{ v }}</span>
+              <span class="var-picker-item-desc">stdout / changed</span>
             </div>
           </div>
         </template>
@@ -97,10 +143,14 @@ const props = withDefaults(defineProps<{
   buttonType?: string
   hideLabel?: boolean
   buttonText?: string
+  registeredVars?: string[]
+  machineGroups?: Array<{ name: string; count: number }>
 }>(), {
   buttonType: 'default',
   hideLabel: false,
   buttonText: '插入变量',
+  registeredVars: () => [],
+  machineGroups: () => [],
 })
 
 const emit = defineEmits<{
@@ -126,10 +176,10 @@ const machineVars: MachineVar[] = [
   { key: 'cpu_model', label: 'CPU 型号' },
   { key: 'cpu_cores', label: 'CPU 核数' },
   { key: 'memory_kb', label: '内存(KB)' },
+  { key: 'swap_kb', label: 'Swap(KB)' },
   { key: 'gateway', label: '网关' },
   { key: 'virtualization', label: '虚拟化类型' },
   { key: 'timezone', label: '时区' },
-  { key: 'status', label: '状态' },
 ]
 
 interface GroupVar {
@@ -162,16 +212,55 @@ const filteredGroupVars = computed(() => {
   )
 })
 
+const filteredRegisteredVars = computed(() => {
+  const kw = searchText.value.toLowerCase()
+  return props.registeredVars.filter(
+    (v) => v.toLowerCase().includes(kw)
+  )
+})
+
+const filteredGroupsVars = computed(() => {
+  const kw = searchText.value.toLowerCase()
+  return props.machineGroups.filter(
+    (g) => g.name.toLowerCase().includes(kw)
+  )
+})
+
 const noResults = computed(() => {
   return (
     filteredGlobalVars.value.length === 0 &&
     filteredMachineVars.value.length === 0 &&
-    filteredGroupVars.value.length === 0
+    filteredGroupVars.value.length === 0 &&
+    filteredGroupsVars.value.length === 0 &&
+    filteredRegisteredVars.value.length === 0
   )
 })
 
 function truncate(s: string, max: number): string {
   return s.length > max ? s.slice(0, max) + '...' : s
+}
+
+// 表达式生成函数
+function machineVarExpr(key: string) {
+  return `{{ .Machine.${key} }}`
+}
+
+function gpuLoopExpr() {
+  return `{{ range $gpuIdx, $gpu := .Machine.gpus }}
+GPU{{$gpuIdx}}: {{$gpu.name}} 数量:{{$gpu.count}} 驱动:{{$gpu.driver_version}}
+{{ end }}`
+}
+
+function diskLoopExpr() {
+  return `{{ range $diskIdx, $disk := .Machine.disks }}
+磁盘{{$diskIdx}}: {{$disk.device}} {{$disk.total_gb}}GB
+{{ end }}`
+}
+
+function networkLoopExpr() {
+  return `{{ range $netIdx, $net := .Machine.networks }}
+网卡{{$netIdx}}: {{$net.ip}} {{$net.mac}}
+{{ end }}`
 }
 
 function selectVariable(expression: string) {
@@ -260,6 +349,16 @@ onMounted(async () => {
   font-size: 12px;
   color: var(--el-text-color-secondary);
   margin-left: auto;
+}
+
+.var-picker-item-loop {
+  background: var(--el-fill-color-lighter);
+  border-radius: 4px;
+  margin-top: 2px;
+}
+
+.var-picker-item-loop:hover {
+  background: var(--el-fill-color-light);
 }
 
 .var-picker-item-value {

@@ -73,16 +73,23 @@
           </el-col>
           <el-col :span="12">
             <el-form-item label="模块类型" prop="module">
-              <el-select v-model="form.module" placeholder="选择模块" style="width: 100%">
-                <el-option label="Shell" value="shell" />
-                <el-option label="Systemd" value="systemd" />
-                <el-option label="Package" value="package" />
-                <el-option label="File" value="file" />
-                <el-option label="Template" value="template" />
-                <el-option label="Repo" value="repo" />
-                <el-option label="Blockinfile" value="blockinfile" />
-                <el-option label="Modprobe" value="modprobe" />
-              </el-select>
+               <el-select v-model="form.module" placeholder="选择模块" style="width: 100%">
+                 <el-option label="Shell" value="shell" />
+                 <el-option label="Script" value="script" />
+                 <el-option label="Systemd" value="systemd" />
+                 <el-option label="Package" value="package" />
+                 <el-option label="File" value="file" />
+                 <el-option label="Template" value="template" />
+                 <el-option label="Repo" value="repo" />
+                 <el-option label="Blockinfile" value="blockinfile" />
+                 <el-option label="Lineinfile" value="lineinfile" />
+                 <el-option label="File Pull" value="file_pull" />
+                 <el-option label="Cfssl" value="cfssl" />
+                 <el-option label="Image" value="image" />
+                 <el-option label="Unarchive" value="unarchive" />
+                 <el-option label="Copy" value="copy" />
+                 <el-option label="Modprobe" value="modprobe" />
+               </el-select>
             </el-form-item>
           </el-col>
         </el-row>
@@ -143,14 +150,21 @@ import {
 import { HandledError } from '@/utils/request'
 
 const MODULE_PARAMS: Record<string, Record<string, string>> = {
-  shell: { command: '执行的命令', script: '脚本内容' },
+  shell: { command: '执行的命令' },
+  script: { script: '脚本内容', script_file: '脚本文件路径（可选）' },
   systemd: { name: '服务名称', action: 'start/stop/restart/enable/disable' },
   package: { name: '包名', state: 'present/absent/latest' },
   file: { src: '源文件路径', dest: '目标路径' },
+  file_pull: { url: '文件URL [必填]', md5: '文件MD5 [必填]', dest: '目标路径', type: '类型[file/dir]' },
   template: { src: '模板路径', dest: '目标路径' },
   repo: { name: '仓库名', state: 'present/absent' },
   blockinfile: { path: '文件路径', block: '插入的内容', marker: '标记注释', insertafter: '插入位置' },
+  lineinfile: { path: '文件路径 [必填]', regexp: '匹配正则 [必填]', line: '目标行 [必填]', action: 'insert/replace/delete [必填]', backrefs: '反向引用', insertbefore: '插入位置' },
   modprobe: { name: '模块名', state: 'present/absent' },
+  cfssl: { action: '操作类型 [必填]: generate_ca/generate_cert' },
+  image: { action: '操作类型 [必填]: load/push/remove/pull', image: '镜像名称 [必填]' },
+  unarchive: { src: '源文件路径 [必填]', dest: '目标路径 [必填]', strip_components: '去除路径层级' },
+  copy: { src: 'Server端源文件路径（绝对路径）[必填]', dest: 'Agent端目标路径（绝对路径）[必填]', type: '类型[file/dir]', recursive: '递归', mode: '文件权限' },
 }
 
 function getParamPlaceholder(module: string, key: string): string {

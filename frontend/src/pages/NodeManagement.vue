@@ -312,27 +312,28 @@
           <el-input v-model="groupFormData.description" type="textarea" :rows="2" placeholder="可选" />
         </el-form-item>
         <el-form-item label="选择机器">
-          <el-select
-            v-model="groupFormData.machine_ids"
-            multiple
-            filterable
-            placeholder="选择要加入分组的机器"
-            style="width: 100%"
-            :loading="machineLoading"
-          >
-            <el-option
-              v-for="m in allMachines"
-              :key="m.id"
-              :label="`${m.hostname || m.ip} (${m.ip}:${m.port})`"
-              :value="m.id"
-            >
-              <div class="machine-option">
-                <span class="status-dot" :class="m.status === 'online' ? 'status-online' : 'status-offline'"></span>
-                <span>{{ m.hostname || m.ip }}</span>
-                <span class="machine-ip">{{ m.ip }}:{{ m.port }}</span>
-              </div>
-            </el-option>
-          </el-select>
+          <div style="width: 100%;">
+            <div style="margin-bottom: 8px; display: flex; gap: 8px;">
+              <el-button size="small" @click="selectAllMachinesNode" :disabled="allMachines.length === 0">
+                <Icon icon="mdi:checkbox-multiple-marked" :size="14" /> 全选
+              </el-button>
+              <el-button size="small" @click="groupFormData.machine_ids = []" :disabled="groupFormData.machine_ids.length === 0">
+                <Icon icon="mdi:checkbox-multiple-blank-outline" :size="14" /> 清空
+              </el-button>
+              <span style="font-size: 12px; color: var(--el-text-color-secondary); line-height: 28px;">
+                已选 {{ groupFormData.machine_ids.length }} / {{ allMachines.length }}
+              </span>
+            </div>
+            <el-select-v2
+              v-model="groupFormData.machine_ids"
+              :options="machineOptionsNode"
+              multiple
+              filterable
+              placeholder="输入关键词搜索机器"
+              style="width: 100%"
+              :loading="machineLoading"
+            />
+          </div>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -395,6 +396,13 @@ const groupFormData = ref({
 const groupFormRules = {
   name: [{ required: true, message: '请输入分组名称', trigger: 'blur' }],
 }
+
+const machineOptionsNode = computed(() =>
+  allMachines.value.map((m) => ({
+    value: m.id,
+    label: `${m.hostname || m.ip} (${m.ip}:${m.port})`,
+  }))
+)
 
 const filteredData = computed(() => {
   return machines.value
@@ -527,6 +535,10 @@ function showCreateGroupDialog() {
   groupFormData.value = { name: '', description: '', machine_ids: [] }
   groupDialogVisible.value = true
   loadMachines()
+}
+
+function selectAllMachinesNode() {
+  groupFormData.value.machine_ids = allMachines.value.map((m) => m.id)
 }
 
 function showEditGroupDialog(row: MachineGroup) {

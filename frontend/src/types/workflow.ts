@@ -42,6 +42,9 @@ export interface WorkflowTask {
   when: string
   hook_ids: string
   loop: string
+  loop_mode?: 'simple' | 'object'
+  loop_keys?: string[]
+  loop_rows?: Record<string, string>[]
   timeout: number
   ignore_errors: boolean
   retries: number
@@ -137,6 +140,9 @@ export interface CreateWorkflowRequest {
         when: string
         hook_ids: string
         loop: string
+        loop_mode?: 'simple' | 'object'
+        loop_keys?: string[]
+        loop_rows?: Record<string, string>[]
         timeout: number
         ignore_errors: boolean
         retries: number

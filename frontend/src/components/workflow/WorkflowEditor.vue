@@ -118,16 +118,23 @@
                 </div>
                 <div class="task-body">
                   <div class="task-row">
-                    <el-select v-model="task.module" placeholder="模块" style="width: 130px">
-                      <el-option label="Shell" value="shell" />
-                      <el-option label="Systemd" value="systemd" />
-                      <el-option label="Package" value="package" />
-                      <el-option label="File" value="file" />
-                      <el-option label="Template" value="template" />
-                      <el-option label="Repo" value="repo" />
-                      <el-option label="Blockinfile" value="blockinfile" />
-                      <el-option label="Modprobe" value="modprobe" />
-                    </el-select>
+                     <el-select v-model="task.module" placeholder="模块" style="width: 130px">
+                       <el-option label="Shell" value="shell" />
+                       <el-option label="Script" value="script" />
+                       <el-option label="Systemd" value="systemd" />
+                       <el-option label="Package" value="package" />
+                       <el-option label="File" value="file" />
+                       <el-option label="Template" value="template" />
+                       <el-option label="Repo" value="repo" />
+                       <el-option label="Blockinfile" value="blockinfile" />
+                       <el-option label="Lineinfile" value="lineinfile" />
+                       <el-option label="File Pull" value="file_pull" />
+                       <el-option label="Cfssl" value="cfssl" />
+                       <el-option label="Image" value="image" />
+                       <el-option label="Unarchive" value="unarchive" />
+                       <el-option label="Copy" value="copy" />
+                       <el-option label="Modprobe" value="modprobe" />
+                     </el-select>
                     <el-input-number v-model="task.timeout" :min="0" :max="3600" placeholder="超时(秒)" style="width: 120px" />
                     <el-input-number v-model="task.retries" :min="0" :max="10" placeholder="重试次数" style="width: 120px" />
                     <el-input-number v-model="task.delay" :min="0" :max="60" placeholder="重试间隔(秒)" style="width: 140px" />
@@ -139,6 +146,89 @@
                     placeholder='参数 JSON，如: {"command": "yum install -y docker-ce"}'
                     class="task-command"
                   />
+                  <div v-if="task.loop && task.loop.length > 0" class="insert-loop-var-row">
+                    <el-dropdown trigger="click" @command="(cmd: string) => insertLoopVar(task, cmd)">
+                      <el-button size="small" type="success" link>
+                        <Icon icon="mdi:code-braces" :size="14" style="margin-right: 4px" />插入循环变量
+                      </el-button>
+                      <template #dropdown>
+                        <el-dropdown-menu>
+                          <el-dropdown-item v-if="task.loop_mode === 'simple'" :command="'{{.item}}'" v-text="'{{.item}}'" />
+                          <template v-if="task.loop_mode === 'object'">
+                            <el-dropdown-item :command="'{{.item}}'" v-text="'{{.item}}（整个对象）'" />
+                            <el-dropdown-item v-for="key in (task.loop_keys || [])" :key="key" :command="`{{.item.${key}}}`" v-text="`{{.item.${key}}}`" />
+                          </template>
+                        </el-dropdown-menu>
+                      </template>
+                    </el-dropdown>
+                  </div>
+                  <div class="loop-section">
+                    <div class="loop-mode-switch">
+                      <el-radio-group v-model="task.loop_mode" size="small">
+                        <el-radio-button value="simple">简单列表</el-radio-button>
+                        <el-radio-button value="object">对象列表</el-radio-button>
+                      </el-radio-group>
+                    </div>
+
+                    <!-- 简单列表模式 -->
+                    <div v-if="task.loop_mode === 'simple'" class="loop-input-wrapper">
+                      <el-tag
+                        v-for="(item, idx) in getLoopArray(task)"
+                        :key="idx"
+                        closable
+                        @close="removeLoopItem(task, idx)"
+                        class="loop-tag"
+                      >
+                        {{ item }}
+                      </el-tag>
+                      <el-input
+                        v-if="loopInputVisible[ti]"
+                        :ref="(el: any) => { loopInputRefs[ti] = el }"
+                        v-model="loopInputValues[ti]"
+                        size="small"
+                        class="loop-input"
+                        placeholder="输入后按 Enter 添加"
+                        @keyup.enter="addLoopItem(task, ti)"
+                        @blur="addLoopItem(task, ti)"
+                      />
+                      <el-button v-else size="small" @click="showLoopInput(ti)">+ 添加项</el-button>
+                    </div>
+
+                    <!-- 对象列表模式 -->
+                    <div v-else class="loop-object-section">
+                      <div class="loop-keys-row">
+                        <span class="loop-keys-label">列名（英文逗号分隔）：</span>
+                        <el-input
+                          :model-value="(task.loop_keys || []).join(',')"
+                          @update:model-value="(v: string) => { task.loop_keys = v.split(',').map(s => s.trim()); syncLoop(task) }"
+                          placeholder="如: name,host,port"
+                          size="small"
+                          class="loop-keys-input"
+                        />
+                      </div>
+                      <div v-if="task.loop_keys && task.loop_keys.length > 0" class="loop-table-wrapper">
+                        <table class="loop-table">
+                          <thead>
+                            <tr>
+                              <th v-for="key in task.loop_keys" :key="key">{{ key }}</th>
+                              <th class="loop-table-action"></th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr v-for="(row, ri) in (task.loop_rows || [])" :key="ri">
+                              <td v-for="key in task.loop_keys" :key="key">
+                                <el-input v-model="row[key]" size="small" @change="syncLoop(task)" />
+                              </td>
+                              <td class="loop-table-action">
+                                <el-button link type="danger" size="small" @click="removeLoopRow(task, ri)">删</el-button>
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                        <el-button size="small" @click="addLoopRow(task)">+ 添加行</el-button>
+                      </div>
+                    </div>
+                  </div>
                   <el-input v-model="task.when" placeholder='条件，如: {{.machine.os_name}} !contains ubuntu' style="width: 100%" />
                   <div class="task-row">
                     <el-input v-model="task.hook_ids" placeholder='后置钩子 ref，如: [1,3]' style="flex: 1" />
@@ -170,7 +260,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { Icon } from '@iconify/vue'
 import { ElMessage } from 'element-plus'
 import { createWorkflowApi, updateWorkflowApi } from '@/api/workflow'
@@ -290,6 +380,9 @@ function addTask() {
     when: '',
     hook_ids: '',
     loop: '',
+    loop_mode: 'simple',
+    loop_keys: [],
+    loop_rows: [],
     timeout: 0,
     ignore_errors: false,
     retries: 0,
@@ -301,6 +394,110 @@ function addTask() {
 function removeTask(index: number) {
   if (!selectedStage.value) return
   selectedStage.value.tasks.splice(index, 1)
+}
+
+// 循环列表
+const loopInputVisible = ref<Record<number, boolean>>({})
+const loopInputValues = ref<Record<number, string>>({})
+const loopInputRefs = ref<Record<number, any>>({})
+
+function getLoopArray(task: any): string[] {
+  if (!task.loop) return []
+  try {
+    const arr = JSON.parse(task.loop)
+    if (Array.isArray(arr) && arr.length > 0 && typeof arr[0] !== 'object') {
+      return arr.map(String)
+    }
+    return []
+  } catch {
+    return []
+  }
+}
+
+function getLoopObjectData(task: any): { keys: string[], rows: Record<string, string>[] } {
+  if (!task.loop) return { keys: [], rows: [] }
+  try {
+    const arr = JSON.parse(task.loop)
+    if (Array.isArray(arr) && arr.length > 0 && typeof arr[0] === 'object' && arr[0] !== null) {
+      const keys = Object.keys(arr[0])
+      const rows = arr.map((item: any) => {
+        const row: Record<string, string> = {}
+        for (const k of keys) row[k] = String(item[k] ?? '')
+        return row
+      })
+      return { keys, rows }
+    }
+    return { keys: [], rows: [] }
+  } catch {
+    return { keys: [], rows: [] }
+  }
+}
+
+function syncLoop(task: any) {
+  if (task.loop_mode === 'object') {
+    task.loop_array = []
+    if (task.loop_rows && task.loop_rows.length > 0) {
+      task.loop = JSON.stringify(task.loop_rows)
+    } else {
+      task.loop = ''
+    }
+  } else {
+    task.loop_keys = []
+    task.loop_rows = []
+    if (task.loop_array && task.loop_array.length > 0) {
+      task.loop = JSON.stringify(task.loop_array)
+    } else {
+      task.loop = ''
+    }
+  }
+}
+
+function showLoopInput(ti: number) {
+  loopInputVisible.value[ti] = true
+  loopInputValues.value[ti] = ''
+  nextTick(() => {
+    const input = loopInputRefs.value[ti]
+    if (input) input.focus()
+  })
+}
+
+function addLoopItem(task: any, ti: number) {
+  const val = (loopInputValues.value[ti] || '').trim()
+  if (val) {
+    if (!task.loop_array) task.loop_array = []
+    task.loop_array.push(val)
+    syncLoop(task)
+  }
+  loopInputVisible.value[ti] = false
+  loopInputValues.value[ti] = ''
+}
+
+function removeLoopItem(task: any, idx: number) {
+  if (task.loop_array) {
+    task.loop_array.splice(idx, 1)
+    syncLoop(task)
+  }
+}
+
+function addLoopRow(task: any) {
+  if (!task.loop_rows) task.loop_rows = []
+  if (!task.loop_keys) task.loop_keys = []
+  const row: Record<string, string> = {}
+  for (const key of task.loop_keys) row[key] = ''
+  task.loop_rows.push(row)
+  syncLoop(task)
+}
+
+function removeLoopRow(task: any, idx: number) {
+  if (task.loop_rows) {
+    task.loop_rows.splice(idx, 1)
+    syncLoop(task)
+  }
+}
+
+function insertLoopVar(task: any, varExpr: string) {
+  // 插入到 params 末尾
+  task.params = (task.params || '') + varExpr
 }
 
 async function saveWorkflow() {
@@ -567,5 +764,49 @@ async function saveWorkflow() {
 
 .empty-stage p {
   margin-top: 12px;
+}
+
+.loop-section {
+  margin: 8px 0;
+}
+
+.loop-label {
+  display: block;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  margin-bottom: 4px;
+}
+
+.loop-input-wrapper {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.loop-tag {
+  margin: 0;
+}
+
+.loop-input {
+  width: 180px;
+}
+
+.loop-tip {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  margin-top: 4px;
+}
+
+.loop-tip code {
+  background: var(--el-fill-color-light);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+
+.insert-loop-var-row {
+  margin-top: 4px;
+  text-align: right;
 }
 </style>

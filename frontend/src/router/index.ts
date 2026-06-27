@@ -89,6 +89,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '钩子管理', icon: 'Hook' },
       },
       {
+        path: 'workflow-templates',
+        name: 'WorkflowTemplateManagement',
+        component: () => import('@/pages/WorkflowTemplateManagement.vue'),
+        meta: { title: '模板文件', icon: 'Document' },
+      },
+      {
         path: 'testing',
         name: 'AutoTesting',
         component: () => import('@/pages/AutoTesting.vue'),

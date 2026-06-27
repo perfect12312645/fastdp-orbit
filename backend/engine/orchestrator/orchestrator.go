@@ -2,7 +2,7 @@
 //
 // 整体架构：
 //
-//	Execution（一次工作流执行）
+//	WorkflowExecution（一次工作流执行）
 //	  └── StageGroup（阶段组，按 Order 从左到右顺序执行，组内支持 parallel/sequential 模式）
 //	        └── Stage（阶段，组内按 Order 从上到下顺序执行）
 //	              └── Task（任务，通过 gRPC 调用 Agent 执行，支持重试、条件执行、后置钩子）
@@ -90,6 +90,7 @@ import (
 	"fastdp-orbit/backend/models/machine"
 	"fastdp-orbit/backend/models/workflow"
 	"fastdp-orbit/backend/pkg/logger"
+	"fastdp-orbit/backend/pkg/utils"
 	agentpb "fastdp-orbit/backend/proto/agent"
 	"fastdp-orbit/backend/server/grpc"
 	"fmt"
@@ -906,6 +907,11 @@ func (o *Orchestrator) executeStage(ctx context.Context, execution *workflow.Wor
 	tasks := stage.Tasks
 	sort.Slice(tasks, func(i, j int) bool { return tasks[i].Order < tasks[j].Order })
 
+	// 注册变量表（stage 级别，用于 register 字段，存储 task 输出供后续 task 引用）
+	// 结构：registeredVars[registerName][host] = {stdout, changed}
+	registeredVars := make(map[string]map[string]map[string]interface{})
+	var registeredVarsMu sync.RWMutex
+
 	// 逐个 task 执行，每个 task 内所有机器并发
 	for _, task := range tasks {
 		if ctx.Err() != nil {
@@ -933,60 +939,131 @@ func (o *Orchestrator) executeStage(ctx context.Context, execution *workflow.Wor
 			}
 		}
 
-		// 并发执行所有机器
-		var taskExecs sync.Map
-		var failCount int32
-		var wg sync.WaitGroup
-
-		for _, m := range stage.MachineGroup.Machines {
-			host := fmt.Sprintf("%s:%d", m.IP, m.Port)
-			wg.Add(1)
-			go func(m machine.Machine) {
-				defer wg.Done()
-				taskExec := &workflow.WorkflowTaskExecution{
-					StageExecutionID: stageExec.ID,
-					TaskID:           task.ID,
-					Host:             host,
-					Status:           "running",
-				}
-				o.executeTask(ctx, taskExec, &task, &m, hooks, params, globalVars, groupVars, groupsMap)
-				taskExecs.Store(host, taskExec)
-				if taskExec.Status == "failed" {
-					atomic.AddInt32(&failCount, 1)
-				}
-			}(m)
-		}
-		wg.Wait()
-
-		// 批量写入所有 taskExec，一次事务
-		o.db.Transaction(func(tx *gorm.DB) error {
-			taskExecs.Range(func(key, value interface{}) bool {
-				tx.Save(value.(*workflow.WorkflowTaskExecution))
+		// loop 处理：解析 JSON 数组，逐个 item 执行
+		if task.Loop != "" {
+			var loopItems []interface{}
+			if err := json.Unmarshal([]byte(task.Loop), &loopItems); err != nil {
+				logger.Warn("任务 loop 参数解析失败", zap.Uint("task_id", task.ID), zap.Error(err))
+				o.db.Model(stageExec).Updates(map[string]interface{}{
+					"status":      "failed",
+					"error":       "任务 loop 参数解析失败",
+					"finished_at": time.Now(),
+				})
+				o.emitStage(execution.ID, stage.ID, "failed")
 				return true
-			})
-			return nil
-		})
+			}
 
-		// 检查 context
-		if ctx.Err() != nil {
-			o.db.Model(stageExec).Updates(map[string]interface{}{
-				"status":      "failed",
-				"error":       "执行被终止",
-				"finished_at": time.Now(),
-			})
-			o.emitStage(execution.ID, stage.ID, "failed")
-			return true
-		}
+			// 逐个 item 执行
+			for _, item := range loopItems {
+				var taskExecs sync.Map
+				var failCount int32
+				var wg sync.WaitGroup
 
-		// 汇总失败信息
-		if failCount > 0 {
-			o.db.Model(stageExec).Updates(map[string]interface{}{
-				"status":      "failed",
-				"error":       fmt.Sprintf("任务 [%s] 在 %d 台机器上失败", task.Name, failCount),
-				"finished_at": time.Now(),
+				for _, m := range stage.MachineGroup.Machines {
+					host := fmt.Sprintf("%s:%d", m.IP, m.Port)
+					wg.Add(1)
+					go func(m machine.Machine) {
+						defer wg.Done()
+						taskExec := &workflow.WorkflowTaskExecution{
+							StageExecutionID: stageExec.ID,
+							TaskID:           task.ID,
+							Host:             host,
+							Status:           "running",
+						}
+						o.executeTask(ctx, taskExec, &task, &m, hooks, params, globalVars, groupVars, groupsMap, item, registeredVars, &registeredVarsMu)
+						taskExecs.Store(host, taskExec)
+						if taskExec.Status == "failed" {
+							atomic.AddInt32(&failCount, 1)
+						}
+					}(m)
+				}
+				wg.Wait()
+
+				o.db.Transaction(func(tx *gorm.DB) error {
+					taskExecs.Range(func(key, value interface{}) bool {
+						tx.Save(value.(*workflow.WorkflowTaskExecution))
+						return true
+					})
+					return nil
+				})
+
+				if ctx.Err() != nil {
+					o.db.Model(stageExec).Updates(map[string]interface{}{
+						"status":      "failed",
+						"error":       "执行被终止",
+						"finished_at": time.Now(),
+					})
+					o.emitStage(execution.ID, stage.ID, "failed")
+					return true
+				}
+
+				// 任一迭代失败则停止后续迭代
+				if failCount > 0 {
+					o.db.Model(stageExec).Updates(map[string]interface{}{
+						"status":      "failed",
+						"error":       fmt.Sprintf("任务 [%s] 循环 %s 时在 %d 台机器上失败", task.Name, item, failCount),
+						"finished_at": time.Now(),
+					})
+					o.emitStage(execution.ID, stage.ID, "failed")
+					return true
+				}
+			}
+		} else {
+			// 无 loop：原有逻辑
+			var taskExecs sync.Map
+			var failCount int32
+			var wg sync.WaitGroup
+
+			for _, m := range stage.MachineGroup.Machines {
+				host := fmt.Sprintf("%s:%d", m.IP, m.Port)
+				wg.Add(1)
+				go func(m machine.Machine) {
+					defer wg.Done()
+					taskExec := &workflow.WorkflowTaskExecution{
+						StageExecutionID: stageExec.ID,
+						TaskID:           task.ID,
+						Host:             host,
+						Status:           "running",
+					}
+					o.executeTask(ctx, taskExec, &task, &m, hooks, params, globalVars, groupVars, groupsMap, nil, registeredVars, &registeredVarsMu)
+					taskExecs.Store(host, taskExec)
+					if taskExec.Status == "failed" {
+						atomic.AddInt32(&failCount, 1)
+					}
+				}(m)
+			}
+			wg.Wait()
+
+			// 批量写入所有 taskExec，一次事务
+			o.db.Transaction(func(tx *gorm.DB) error {
+				taskExecs.Range(func(key, value interface{}) bool {
+					tx.Save(value.(*workflow.WorkflowTaskExecution))
+					return true
+				})
+				return nil
 			})
-			o.emitStage(execution.ID, stage.ID, "failed")
-			return true
+
+			// 检查 context
+			if ctx.Err() != nil {
+				o.db.Model(stageExec).Updates(map[string]interface{}{
+					"status":      "failed",
+					"error":       "执行被终止",
+					"finished_at": time.Now(),
+				})
+				o.emitStage(execution.ID, stage.ID, "failed")
+				return true
+			}
+
+			// 汇总失败信息
+			if failCount > 0 {
+				o.db.Model(stageExec).Updates(map[string]interface{}{
+					"status":      "failed",
+					"error":       fmt.Sprintf("任务 [%s] 在 %d 台机器上失败", task.Name, failCount),
+					"finished_at": time.Now(),
+				})
+				o.emitStage(execution.ID, stage.ID, "failed")
+				return true
+			}
 		}
 	}
 
@@ -1002,10 +1079,20 @@ func (o *Orchestrator) executeStage(ctx context.Context, execution *workflow.Wor
 
 // executeTask 执行单个任务（通过 gRPC 调用 Agent），支持重试
 // 注意：此函数不做任何 DB 写入和日志输出，由调用方批量处理
-func (o *Orchestrator) executeTask(ctx context.Context, taskExec *workflow.WorkflowTaskExecution, task *workflow.WorkflowTask, m *machine.Machine, hooks []workflow.WorkflowHook, params map[string]string, globalVars map[string]interface{}, groupVars map[string]interface{}, groupsMap map[string]interface{}) {
+func (o *Orchestrator) executeTask(ctx context.Context, taskExec *workflow.WorkflowTaskExecution, task *workflow.WorkflowTask, m *machine.Machine, hooks []workflow.WorkflowHook, params map[string]string, globalVars map[string]interface{}, groupVars map[string]interface{}, groupsMap map[string]interface{}, loopItem interface{}, registeredVars map[string]map[string]map[string]interface{}, registeredVarsMu *sync.RWMutex) {
 	host := fmt.Sprintf("%s:%d", m.IP, m.Port)
 
 	machineMap := machineToMap(m)
+
+	// 构建当前机器的 register 变量（per-machine，只取当前 host 的数据）
+	currentRegister := make(map[string]interface{})
+	registeredVarsMu.RLock()
+	for regName, hostMap := range registeredVars {
+		if data, ok := hostMap[host]; ok {
+			currentRegister[regName] = data
+		}
+	}
+	registeredVarsMu.RUnlock()
 
 	// 构建完整的模板变量上下文
 	templateVars := map[string]interface{}{
@@ -1013,6 +1100,10 @@ func (o *Orchestrator) executeTask(ctx context.Context, taskExec *workflow.Workf
 		"GlobalVariable": globalVars,
 		"Group":          groupVars,
 		"Groups":         groupsMap,
+		"Register":       currentRegister,
+	}
+	if loopItem != nil {
+		templateVars["item"] = loopItem
 	}
 
 	// 检查 when 条件（兼容旧格式 .machine 和新格式 .Machine）
@@ -1022,6 +1113,10 @@ func (o *Orchestrator) executeTask(ctx context.Context, taskExec *workflow.Workf
 			"GlobalVariable": globalVars,
 			"Group":          groupVars,
 			"Groups":         groupsMap,
+			"Register":       currentRegister,
+		}
+		if loopItem != nil {
+			whenVars["item"] = loopItem
 		}
 		run, err := evaluateWhen(task.When, whenVars)
 		if err != nil {
@@ -1045,6 +1140,40 @@ func (o *Orchestrator) executeTask(ctx context.Context, taskExec *workflow.Workf
 			renderedParams[k] = v
 		} else {
 			renderedParams[k] = rendered
+		}
+	}
+
+	// copy 模块自动计算 server 侧 src 文件的 MD5
+	if task.Module == "copy" {
+		if srcPath, ok := renderedParams["src"]; ok && srcPath != "" {
+			if md5Val, err := utils.FileMD5(srcPath); err == nil {
+				renderedParams["md5"] = md5Val
+			} else {
+				logger.Warn("copy模块自动计算MD5失败", zap.String("src", srcPath), zap.Error(err))
+			}
+		}
+	}
+
+	// template 模块：如果指定了 src（模板名称），从 DB 读取模板内容并渲染
+	if task.Module == "template" {
+		if srcVal, ok := renderedParams["src"]; ok && srcVal != "" && renderedParams["content"] == "" {
+			var tpl workflow.WorkflowTemplate
+			if err := o.db.Where("name = ?", srcVal).First(&tpl).Error; err == nil {
+				// 渲染模板内容
+				rendered, err := renderWhenTemplate(tpl.Content, templateVars)
+				if err != nil {
+					logger.Warn("template模块渲染模板失败", zap.String("src", srcVal), zap.Error(err))
+					taskExec.Status = "failed"
+					taskExec.Error = fmt.Sprintf("渲染模板失败: %v", err)
+					return
+				}
+				renderedParams["content"] = rendered
+				delete(renderedParams, "src") // 不传 src 给 agent
+			} else {
+				taskExec.Status = "failed"
+				taskExec.Error = fmt.Sprintf("模板「%s」不存在", srcVal)
+				return
+			}
 		}
 	}
 
@@ -1097,6 +1226,7 @@ func (o *Orchestrator) executeTask(ctx context.Context, taskExec *workflow.Workf
 			Module:     task.Module,
 			Parameters: renderedParams,
 			TaskId:     fmt.Sprintf("ref-%d", task.Ref),
+			Timeout:    int32(task.Timeout),
 		})
 		cancel()
 
@@ -1116,7 +1246,6 @@ func (o *Orchestrator) executeTask(ctx context.Context, taskExec *workflow.Workf
 			// 业务失败（agent 已响应，但执行失败）
 			hasAgentResponse = true
 			lastChanged = resp.Changed
-			taskExec.Stderr = resp.Stderr
 			if resp.Error != nil {
 				taskExec.ErrorCode = resp.Error.Code
 				taskExec.Error = resp.Error.Message
@@ -1130,8 +1259,20 @@ func (o *Orchestrator) executeTask(ctx context.Context, taskExec *workflow.Workf
 		// 成功
 		taskExec.Status = "success"
 		taskExec.Output = resp.Stdout
-		taskExec.Stderr = resp.Stderr
 		taskExec.Changed = resp.Changed
+
+		// 注册变量（per-machine，按 host 存储，供后续 task 的 when 或 params 引用）
+		if task.Register != "" {
+			registeredVarsMu.Lock()
+			if registeredVars[task.Register] == nil {
+				registeredVars[task.Register] = make(map[string]map[string]interface{})
+			}
+			registeredVars[task.Register][host] = map[string]interface{}{
+				"stdout":  resp.Stdout,
+				"changed": resp.Changed,
+			}
+			registeredVarsMu.Unlock()
+		}
 
 		// 执行后置钩子：Changed=true 或上次钩子失败时触发
 		if task.HookIDs != "" {
@@ -1269,7 +1410,11 @@ func (o *Orchestrator) executeHooks(ctx context.Context, host string, hookIDsJSO
 
 			if !resp.Success {
 				hadAgentResponse = true
-				lastErr = fmt.Errorf("钩子执行失败: %s", resp.Stderr)
+				if resp.Error != nil {
+					lastErr = fmt.Errorf("钩子执行失败: %s", resp.Error.Message)
+				} else {
+					lastErr = fmt.Errorf("钩子执行失败（无详细错误信息）")
+				}
 				continue
 			}
 

@@ -22,6 +22,7 @@ import (
 	"fastdp-orbit/backend/server/cache"
 	servergrpc "fastdp-orbit/backend/server/grpc"
 	workflowsvc "fastdp-orbit/backend/services/workflow"
+	storagesvc "fastdp-orbit/backend/services/storage"
 
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -97,6 +98,10 @@ func main() {
 	// 创建工作流服务
 	workflowService := workflowsvc.NewService(db)
 	views.WorkflowService = workflowService
+
+	// 创建存储服务
+	storageService := storagesvc.NewService(db, "./storage")
+	views.StorageService = storageService
 
 	// 注入机器分组数据库
 	views.MachineGroupDB = db

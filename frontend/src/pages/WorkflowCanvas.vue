@@ -934,7 +934,7 @@ function onDropToGroup(e: DragEvent, groupIndex: number) {
         order: i + 1,
         when: t.when || '',
         hook_ids: t.hook_ids || '',
-        loop: '',
+        loop: t.loop || '',
         timeout: t.timeout || 0,
         ignore_errors: t.ignore_errors ?? false,
         retries: t.retries || 0,

@@ -126,6 +126,7 @@ const menuItems = [
   { path: '/stages', title: '阶段管理', icon: 'mdi:view-column-outline' },
   { path: '/global-variables', title: '全局变量', icon: 'mdi:code-json' },
   { path: '/hook-templates', title: '钩子管理', icon: 'mdi:hook' },
+  { path: '/workflow-templates', title: '模板文件', icon: 'mdi:file-document-outline' },
   { path: '/testing', title: '自动化测试', icon: 'mdi:test-tube-outline' },
   { path: '/settings', title: '系统设置', icon: 'mdi:cog-outline' },
 ]

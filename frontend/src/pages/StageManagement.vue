@@ -206,26 +206,103 @@
                   </div>
                   <div class="task-card-body">
                     <el-row :gutter="16">
-                      <el-col :span="4">
-                        <el-form-item label="引用ID" class="task-field">
-                          <el-input-number v-model="task.ref" :min="1" style="width: 100%" />
-                        </el-form-item>
-                      </el-col>
-                      <el-col :span="5">
+                      <el-col :span="8">
                         <el-form-item label="模块类型" class="task-field">
-                          <el-select v-model="task.module" placeholder="选择模块" style="width: 100%" @change="resetTaskParams(task)">
-                            <el-option label="Shell" value="shell" />
-                            <el-option label="Systemd" value="systemd" />
-                            <el-option label="Package" value="package" />
-                            <el-option label="File" value="file" />
-                            <el-option label="Template" value="template" />
-                            <el-option label="Repo" value="repo" />
-                            <el-option label="Blockinfile" value="blockinfile" />
-                            <el-option label="Modprobe" value="modprobe" />
-                          </el-select>
+                           <el-select v-model="task.module" placeholder="选择模块" style="width: 100%" @change="resetTaskParams(task)">
+                             <el-option label="Shell" value="shell">
+                               <div class="module-option">
+                                 <span class="module-option-name">Shell</span>
+                                 <span class="module-option-desc">执行Shell命令</span>
+                               </div>
+                             </el-option>
+                             <el-option label="Script" value="script">
+                               <div class="module-option">
+                                 <span class="module-option-name">Script</span>
+                                 <span class="module-option-desc">执行脚本内容</span>
+                               </div>
+                             </el-option>
+                             <el-option label="Systemd" value="systemd">
+                               <div class="module-option">
+                                 <span class="module-option-name">Systemd</span>
+                                 <span class="module-option-desc">管理服务（启动/停止/重启）</span>
+                               </div>
+                             </el-option>
+                             <el-option label="Package" value="package">
+                               <div class="module-option">
+                                 <span class="module-option-name">Package</span>
+                                 <span class="module-option-desc">安装/卸载软件包</span>
+                               </div>
+                             </el-option>
+                             <el-option label="File" value="file">
+                               <div class="module-option">
+                                 <span class="module-option-name">File</span>
+                                 <span class="module-option-desc">文件/目录操作</span>
+                               </div>
+                             </el-option>
+                             <el-option label="Template" value="template">
+                               <div class="module-option">
+                                 <span class="module-option-name">Template</span>
+                                 <span class="module-option-desc">渲染模板并写入文件</span>
+                               </div>
+                             </el-option>
+                             <el-option label="Copy" value="copy">
+                               <div class="module-option">
+                                 <span class="module-option-name">Copy</span>
+                                 <span class="module-option-desc">从Server分发文件到Agent</span>
+                               </div>
+                             </el-option>
+                             <el-option label="File Pull" value="file_pull">
+                               <div class="module-option">
+                                 <span class="module-option-name">File Pull</span>
+                                 <span class="module-option-desc">从URL拉取文件到Agent</span>
+                               </div>
+                             </el-option>
+                             <el-option label="Unarchive" value="unarchive">
+                               <div class="module-option">
+                                 <span class="module-option-name">Unarchive</span>
+                                 <span class="module-option-desc">解压文件</span>
+                               </div>
+                             </el-option>
+                             <el-option label="Repo" value="repo">
+                               <div class="module-option">
+                                 <span class="module-option-name">Repo</span>
+                                 <span class="module-option-desc">管理YUM/APT仓库</span>
+                               </div>
+                             </el-option>
+                             <el-option label="Blockinfile" value="blockinfile">
+                               <div class="module-option">
+                                 <span class="module-option-name">Blockinfile</span>
+                                 <span class="module-option-desc">在文件中插入/更新文本块</span>
+                               </div>
+                             </el-option>
+                             <el-option label="Lineinfile" value="lineinfile">
+                               <div class="module-option">
+                                 <span class="module-option-name">Lineinfile</span>
+                                 <span class="module-option-desc">在文件中插入/替换/删除行</span>
+                               </div>
+                             </el-option>
+                             <el-option label="Cfssl" value="cfssl">
+                               <div class="module-option">
+                                 <span class="module-option-name">Cfssl</span>
+                                 <span class="module-option-desc">生成TLS证书</span>
+                               </div>
+                             </el-option>
+                             <el-option label="Image" value="image">
+                               <div class="module-option">
+                                 <span class="module-option-name">Image</span>
+                                 <span class="module-option-desc">管理容器镜像</span>
+                               </div>
+                             </el-option>
+                             <el-option label="Modprobe" value="modprobe">
+                               <div class="module-option">
+                                 <span class="module-option-name">Modprobe</span>
+                                 <span class="module-option-desc">加载/卸载内核模块</span>
+                               </div>
+                             </el-option>
+                           </el-select>
                         </el-form-item>
                       </el-col>
-                      <el-col :span="5">
+                      <el-col :span="4">
                         <el-form-item class="task-field">
                           <template #label>
                             <el-tooltip content="0 表示不限制超时" placement="top">
@@ -235,14 +312,19 @@
                           <el-input-number v-model="task.timeout" :min="0" :max="3600" style="width: 100%" />
                         </el-form-item>
                       </el-col>
-                      <el-col :span="5">
+                      <el-col :span="4">
                         <el-form-item label="重试次数" class="task-field">
                           <el-input-number v-model="task.retries" :min="0" :max="10" style="width: 100%" />
                         </el-form-item>
                       </el-col>
-                      <el-col :span="5">
+                      <el-col :span="4">
                         <el-form-item label="重试间隔(秒)" class="task-field">
                           <el-input-number v-model="task.delay" :min="0" :max="60" style="width: 100%" />
+                        </el-form-item>
+                      </el-col>
+                      <el-col :span="4">
+                        <el-form-item label="引用ID" class="task-field">
+                          <el-input-number v-model="task.ref" :min="1" style="width: 100%" />
                         </el-form-item>
                       </el-col>
                     </el-row>
@@ -255,14 +337,53 @@
                         <div class="params-kv-list">
                           <div v-for="(key, pi) in Object.keys(task.params)" :key="pi" class="params-kv-row">
                             <span class="params-kv-key">{{ key }}</span>
+                            <!-- template 模块的 src 参数：下拉选择模板文件 -->
+                            <el-select
+                              v-if="task.module === 'template' && key === 'src'"
+                              v-model="task.params[key]"
+                              placeholder="选择模板文件"
+                              clearable
+                              filterable
+                              class="params-kv-value"
+                            >
+                              <el-option
+                                v-for="tpl in workflowTemplates"
+                                :key="tpl.id"
+                                :label="tpl.name"
+                                :value="tpl.name"
+                              >
+                                <span>{{ tpl.name }}</span>
+                                <span style="color: #909399; margin-left: 8px; font-size: 12px;">{{ tpl.description }}</span>
+                              </el-option>
+                            </el-select>
+                            <!-- 其他参数：普通输入框 -->
                             <el-input
+                              v-else
                               v-model="task.params[key]"
                               :placeholder="getParamPlaceholder(task.module, key)"
                               class="params-kv-value"
                             />
                             <div class="params-kv-actions">
+                              <el-dropdown v-if="task.loop && task.loop.length > 0" trigger="click" @command="(cmd: string) => { task.params[key] += cmd }">
+                                <el-button size="small" type="success" link class="loop-var-btn">
+                                  <Icon icon="mdi:code-braces" :size="14" />循环变量
+                                </el-button>
+                                <template #dropdown>
+                                  <el-dropdown-menu>
+                                    <el-dropdown-item v-if="task.loop_mode === 'simple'" :command="'{{.item}}'" v-text="'{{.item}}'" />
+                                    <template v-if="task.loop_mode === 'object'">
+                                      <el-dropdown-item :command="'{{.item}}'" v-text="'{{.item}}（整个对象）'" />
+                                      <el-dropdown-item v-for="k in task.loop_keys" :key="k" :command="`{{.item.${k}}}`" v-text="`{{.item.${k}}}`" />
+                                    </template>
+                                  </el-dropdown-menu>
+                                </template>
+                              </el-dropdown>
+                              <!-- template 模块的 src 参数不显示插入变量按钮 -->
                               <VariablePicker
+                                v-if="!(task.module === 'template' && key === 'src')"
                                 button-type="primary"
+                                :registered-vars="getRegisteredVarsBefore(formData.tasks, ti)"
+                                :machine-groups="machineGroupsForPicker"
                                 @select="(expr: string) => { task.params[key] += expr }"
                               />
                             </div>
@@ -279,6 +400,8 @@
                         <div class="when-row">
                           <VariablePicker
                             button-type="primary"
+                            :registered-vars="getRegisteredVarsBefore(formData.tasks, ti)"
+                            :machine-groups="machineGroupsForPicker"
                             @select="(expr: string) => { getWhenClause(task, ti).left = expr; updateWhenFromClause(task, ti) }"
                           />
                           <el-input
@@ -310,11 +433,82 @@
                           />
                           <VariablePicker
                             button-type="primary"
+                            :registered-vars="getRegisteredVarsBefore(formData.tasks, ti)"
+                            :machine-groups="machineGroupsForPicker"
                             @select="(expr: string) => { getWhenClause(task, ti).right += expr; updateWhenFromClause(task, ti) }"
                           />
                         </div>
                       </div>
                     </el-form-item>
+
+                    <el-form-item label="循环列表" class="task-field">
+                      <div class="loop-section">
+                        <el-radio-group v-model="task.loop_mode" size="small" class="loop-mode-switch">
+                          <el-radio-button value="simple">简单列表</el-radio-button>
+                          <el-radio-button value="object">对象列表</el-radio-button>
+                        </el-radio-group>
+
+                        <!-- 简单列表模式 -->
+                        <div v-if="task.loop_mode === 'simple'" class="loop-input-wrapper">
+                          <el-tag
+                            v-for="(item, idx) in task.loop_array"
+                            :key="idx"
+                            closable
+                            @close="task.loop_array.splice(idx, 1)"
+                            class="loop-tag"
+                          >
+                            {{ item }}
+                          </el-tag>
+                          <el-input
+                            v-if="loopInputVisible[ti]"
+                            ref="loopInputRef"
+                            v-model="loopInputValue[ti]"
+                            size="small"
+                            class="loop-input"
+                            placeholder="输入后按 Enter 添加"
+                            @keyup.enter="addLoopItem(task, ti)"
+                            @blur="addLoopItem(task, ti)"
+                          />
+                          <el-button v-else size="small" @click="showLoopInput(ti)">+ 添加项</el-button>
+                        </div>
+
+                        <!-- 对象列表模式 -->
+                        <div v-else class="loop-object-section">
+                          <div class="loop-keys-row">
+                            <span class="loop-keys-label">列名（英文逗号分隔）：</span>
+                          <el-input
+                            :model-value="(task.loop_keys || []).join(',')"
+                            @update:model-value="(v: string) => { task.loop_keys = v.split(',').map((s: string) => s.trim()) }"
+                            placeholder="如: name,host,port"
+                            size="small"
+                            class="loop-keys-input"
+                          />
+                          </div>
+                          <div v-if="task.loop_keys.length > 0" class="loop-table-wrapper">
+                            <table class="loop-table">
+                              <thead>
+                                <tr>
+                                  <th v-for="key in task.loop_keys" :key="key">{{ key }}</th>
+                                  <th class="loop-table-action"></th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                <tr v-for="(row, ri) in task.loop_rows" :key="ri">
+                                  <td v-for="key in task.loop_keys" :key="key">
+                                    <el-input v-model="row[key]" size="small" />
+                                  </td>
+                                  <td class="loop-table-action">
+                                    <el-button link type="danger" size="small" @click="task.loop_rows.splice(ri, 1)">删</el-button>
+                                  </td>
+                                </tr>
+                              </tbody>
+                            </table>
+                            <el-button size="small" @click="addLoopRow(task)">+ 添加行</el-button>
+                          </div>
+                        </div>
+                      </div>
+                    </el-form-item>
+
                     <el-row :gutter="16">
                       <el-col :span="8">
                         <el-form-item label="后置钩子" class="task-field">
@@ -515,7 +709,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { Icon } from '@iconify/vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import * as yaml from 'js-yaml'
@@ -534,6 +728,10 @@ import {
   getHookTemplatesApi,
   type HookTemplate,
 } from '@/api/hookTemplate'
+import {
+  getWorkflowTemplatesApi,
+  type WorkflowTemplate,
+} from '@/api/workflowTemplate'
 import { HandledError } from '@/utils/request'
 import VariablePicker from '@/components/VariablePicker.vue'
 
@@ -551,18 +749,30 @@ interface StageTask {
   hook_ids_array: string[]
   register: string
   ignore_errors: boolean
+  loop: string
+  loop_array: string[]
+  loop_mode: 'simple' | 'object'
+  loop_keys: string[]
+  loop_rows: Record<string, string>[]
 }
 
 // 每种模块支持的参数 key 和占位说明
 const MODULE_PARAMS: Record<string, Record<string, string>> = {
-  shell: { command: '执行的命令', script: '脚本内容' },
+  shell: { command: '执行的命令' },
+  script: { script: '脚本内容', script_file: '脚本文件路径（可选）' },
   systemd: { name: '服务名称', action: 'start/stop/restart/enable/disable' },
   package: { name: '包名', state: 'present/absent/latest' },
   file: { src: '源文件路径', dest: '目标路径' },
-  template: { src: '模板路径', dest: '目标路径' },
+  file_pull: { url: '文件URL（支持http/https）[必填]', dest: '目标路径（绝对路径，以/结尾则自动提取文件名）[必填]', md5: '文件MD5（可选，用于校验）' },
+  template: { src: '选择模板文件（与content二选一）', content: '内联模板内容（与src二选一，content优先）', dest: '目标路径（绝对路径）[必填]', append: '追加模式/覆盖模式（true/false）默认false' },
   repo: { name: '仓库名', state: 'present/absent' },
   blockinfile: { path: '文件路径', block: '插入的内容', marker: '标记注释', insertafter: '插入位置' },
+  lineinfile: { path: '文件路径 [必填]', regexp: '匹配正则 [必填]', line: '目标行 [必填]', action: 'insert/replace/delete [必填]', backrefs: '反向引用', insertbefore: '插入位置' },
   modprobe: { name: '模块名', state: 'present/absent' },
+  cfssl: { action: '操作类型 [必填]: generate_ca/generate_cert' },
+  image: { action: '操作类型 [必填]: load/push/remove/pull', image: '镜像名称 [必填]' },
+  unarchive: { src: '源文件路径 [必填]', dest: '目标路径 [必填]', strip_components: '去除路径层级' },
+  copy: { src: 'Server端源文件路径（绝对路径）[必填]', dest: 'Agent端目标路径（绝对路径）[必填]', type: '类型[file/dir]', recursive: '递归', mode: '文件权限' },
 }
 
 function getParamPlaceholder(module: string, key: string): string {
@@ -576,12 +786,32 @@ function resetTaskParams(task: StageTask) {
   task.params = newParams
 }
 
+// 获取当前 task 之前的所有已注册变量名
+function getRegisteredVarsBefore(tasks: StageTask[], currentIndex: number): string[] {
+  const vars: string[] = []
+  for (let i = 0; i < currentIndex; i++) {
+    if (tasks[i].register && tasks[i].register.trim()) {
+      vars.push(tasks[i].register.trim())
+    }
+  }
+  return vars
+}
+
+// 机器分组数据（用于 VariablePicker 的 Groups 引用）
+const machineGroupsForPicker = computed(() => {
+  return machineGroups.value.map(g => ({
+    name: g.name,
+    count: g.machines?.length || 0,
+  }))
+})
+
 const loading = ref(false)
 const searchText = ref('')
 const stages = ref<StageTemplate[]>([])
 const machineGroups = ref<MachineGroup[]>([])
 const machineGroupLoading = ref(false)
 const hookTemplates = ref<HookTemplate[]>([])
+const workflowTemplates = ref<WorkflowTemplate[]>([])
 
 // 视图模式
 const viewMode = ref<'list' | 'edit' | 'versions'>('list')
@@ -670,6 +900,38 @@ function updateWhenFromClause(task: StageTask, ti: number) {
   task.when = assembleWhen(whenClauses.value[ti])
 }
 
+// 循环列表输入
+const loopInputVisible = ref<Record<number, boolean>>({})
+const loopInputValue = ref<Record<number, string>>({})
+const loopInputRef = ref<InstanceType<typeof import('element-plus')['ElInput']>>()
+
+function showLoopInput(ti: number) {
+  loopInputVisible.value[ti] = true
+  loopInputValue.value[ti] = ''
+  nextTick(() => {
+    const input = loopInputRef.value
+    if (input) input.focus()
+  })
+}
+
+function addLoopItem(task: StageTask, ti: number) {
+  const val = (loopInputValue.value[ti] || '').trim()
+  if (val) {
+    if (!task.loop_array) task.loop_array = []
+    task.loop_array.push(val)
+  }
+  loopInputVisible.value[ti] = false
+  loopInputValue.value[ti] = ''
+}
+
+function addLoopRow(task: StageTask) {
+  const row: Record<string, string> = {}
+  for (const key of task.loop_keys) {
+    row[key] = ''
+  }
+  task.loop_rows.push(row)
+}
+
 const filteredStages = computed(() => {
   if (!searchText.value) return stages.value
   const kw = searchText.value.toLowerCase()
@@ -715,11 +977,43 @@ function normalizeTasks(rawTasks: any[]): StageTask[] {
       }
     }
 
+    // 解析 loop JSON 数组 -> loop_array / loop_rows + loop_mode
+    let loop_array: string[] = []
+    let loop_mode: 'simple' | 'object' = 'simple'
+    let loop_keys: string[] = []
+    let loop_rows: Record<string, string>[] = []
+    if (t.loop) {
+      try {
+        const parsed = JSON.parse(t.loop)
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          if (typeof parsed[0] === 'object' && parsed[0] !== null) {
+            loop_mode = 'object'
+            loop_keys = Object.keys(parsed[0])
+            loop_rows = parsed.map((item: any) => {
+              const row: Record<string, string> = {}
+              for (const k of loop_keys) {
+                row[k] = String(item[k] ?? '')
+              }
+              return row
+            })
+          } else {
+            loop_array = parsed.map(String)
+          }
+        }
+      } catch {
+        loop_array = []
+      }
+    }
+
     return {
       ...t,
       params,
       order: t.order || i + 1,
       hook_ids_array,
+      loop_array,
+      loop_mode,
+      loop_keys,
+      loop_rows,
     }
   })
 }
@@ -750,12 +1044,14 @@ function formatTime(t: string): string {
 async function loadData() {
   loading.value = true
   try {
-    const [stagesData, hooksData] = await Promise.all([
+    const [stagesData, hooksData, templatesData] = await Promise.all([
       getStageTemplatesApi(),
       getHookTemplatesApi().catch(() => [] as HookTemplate[]),
+      getWorkflowTemplatesApi().catch(() => [] as WorkflowTemplate[]),
     ])
     stages.value = stagesData
     hookTemplates.value = hooksData
+    workflowTemplates.value = templatesData
   } catch (e) {
     console.error(e)
   } finally {
@@ -836,6 +1132,11 @@ function addTask() {
     hook_ids_array: [],
     register: '',
     ignore_errors: false,
+    loop: '',
+    loop_array: [],
+    loop_mode: 'simple',
+    loop_keys: [],
+    loop_rows: [],
   })
 }
 
@@ -904,6 +1205,7 @@ function formToYaml() {
       if (t.params) task.params = t.params
       if (t.when) task.when = t.when
       if (t.hook_ids) task.hook_ids = t.hook_ids
+      if (t.loop) task.loop = t.loop
       if (t.register) task.register = t.register
       if (t.ignore_errors) task.ignore_errors = t.ignore_errors
       return task
@@ -950,13 +1252,32 @@ watch(editMode, (mode) => {
   }
 })
 
-// 同步 hook_ids_array <-> hook_ids
+// 同步 hook_ids_array <-> hook_ids, loop_array/loop_rows <-> loop
 watch(() => formData.value.tasks, (tasks) => {
   for (const task of tasks) {
     if (task.hook_ids_array && task.hook_ids_array.length > 0) {
       task.hook_ids = JSON.stringify(task.hook_ids_array)
     } else {
       task.hook_ids = ''
+    }
+    if (task.loop_mode === 'object') {
+      if (Array.isArray(task.loop_array)) task.loop_array.splice(0)
+      else task.loop_array = []
+      if (task.loop_rows && task.loop_rows.length > 0) {
+        task.loop = JSON.stringify(task.loop_rows)
+      } else {
+        task.loop = ''
+      }
+    } else {
+      if (Array.isArray(task.loop_keys)) task.loop_keys.splice(0)
+      else task.loop_keys = []
+      if (Array.isArray(task.loop_rows)) task.loop_rows.splice(0)
+      else task.loop_rows = []
+      if (task.loop_array && task.loop_array.length > 0) {
+        task.loop = JSON.stringify(task.loop_array)
+      } else {
+        task.loop = ''
+      }
     }
   }
 }, { deep: true })
@@ -1306,6 +1627,9 @@ onMounted(loadData)
   display: flex;
   flex-direction: column;
   gap: 12px;
+  max-height: calc(100vh - 400px);
+  overflow-y: auto;
+  padding-bottom: 16px;
 }
 
 .task-card {
@@ -1394,6 +1718,24 @@ onMounted(loadData)
   border-radius: 6px;
   font-size: 13px;
   color: var(--el-text-color-secondary);
+}
+
+/* 模块选项样式 */
+.module-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 2px 0;
+}
+
+.module-option-name {
+  font-weight: 500;
+  min-width: 80px;
+}
+
+.module-option-desc {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
 }
 
 .group-nav-link {
@@ -1718,5 +2060,85 @@ onMounted(loadData)
 .when-right :deep(.el-input__inner) {
   font-family: monospace;
   font-size: 13px;
+}
+
+.loop-input-wrapper {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  width: 100%;
+}
+
+.loop-tag {
+  margin: 0;
+}
+
+.loop-input {
+  width: 180px;
+}
+
+.loop-section {
+  width: 100%;
+}
+
+.loop-mode-switch {
+  margin-bottom: 8px;
+}
+
+.loop-object-section {
+  width: 100%;
+}
+
+.loop-keys-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.loop-keys-label {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  white-space: nowrap;
+}
+
+.loop-keys-input {
+  flex: 1;
+}
+
+.loop-table-wrapper {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.loop-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.loop-table th,
+.loop-table td {
+  border: 1px solid var(--el-border-color-lighter);
+  padding: 4px 6px;
+  text-align: left;
+}
+
+.loop-table th {
+  background: var(--el-fill-color-lighter);
+  font-weight: 500;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.loop-table-action {
+  width: 40px;
+  text-align: center !important;
+}
+
+.loop-var-btn {
+  margin-left: 4px;
 }
 </style>

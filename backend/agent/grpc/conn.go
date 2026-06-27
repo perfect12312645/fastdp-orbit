@@ -2,6 +2,7 @@ package grpc
 
 import (
 	"context"
+	"fmt"
 	"fastdp-orbit/backend/config"
 	"fastdp-orbit/backend/pkg/logger"
 	"fastdp-orbit/backend/pkg/tlsutil"
@@ -94,6 +95,21 @@ func GetClientConn(cfg *config.AgentConfig) (*grpc.ClientConn, error) {
 	globalConn = newConn
 	logger.Info("新连接创建成功", zap.String("state", globalConn.GetState().String()))
 	return globalConn, nil
+}
+
+// GetExistingConn 获取已建立的连接（无需配置，agent 启动时已连接）
+func GetExistingConn() (*grpc.ClientConn, error) {
+	connMux.Lock()
+	defer connMux.Unlock()
+
+	if globalConn != nil {
+		state := globalConn.GetState()
+		if state == connectivity.Ready || state == connectivity.Idle {
+			return globalConn, nil
+		}
+	}
+
+	return nil, fmt.Errorf("连接未建立或已关闭")
 }
 
 // CloseConn 关闭全局连接

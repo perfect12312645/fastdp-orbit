@@ -24,6 +24,7 @@ message ExecRequest {
     string module = 2;            // 模块名（如"shell"、"copy"、"file"、"service"）
     map<string, string> parameters = 3; // 模块参数
     string task_id = 4;           // 任务唯一ID（批量执行时用于关联响应）
+    int32 timeout = 5;            // 超时时间（秒），0表示不超时
 }
 
 // BatchExecRequest 批量执行请求（对应Playbook的一次运行）
@@ -39,10 +40,9 @@ message ExecResponse {
     string task_id = 2;           // 任务ID（回显，批量执行时关联请求）
     bool success = 3;             // 执行是否成功（不代表是否有变更）
     string stdout = 4;            // 标准输出（模块正常输出）
-    string stderr = 5;            // 标准错误（非致命警告）
-    bool changed = 6;             // 是否产生变更（幂等性核心：true=有变更，false=无变更）
-    ErrorDetail error = 7;        // 错误详情（success=false时非空）
-    int64 duration_ms = 8;        // 执行耗时（毫秒）
+    bool changed = 5;             // 是否产生变更（幂等性核心：true=有变更，false=无变更）
+    ErrorDetail error = 6;        // 错误详情（success=false时非空）
+    int64 duration_ms = 7;        // 执行耗时（毫秒）
 }
 
 // ErrorDetail 错误详情

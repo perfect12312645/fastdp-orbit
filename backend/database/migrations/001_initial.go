@@ -3,6 +3,7 @@ package migrations
 import (
 	"fastdp-orbit/backend/models/common"
 	"fastdp-orbit/backend/models/machine"
+	"fastdp-orbit/backend/models/storage"
 	"fastdp-orbit/backend/models/workflow"
 
 	"gorm.io/gorm"
@@ -41,6 +42,10 @@ func InitialMigration(db *gorm.DB) error {
 		&workflow.GlobalVariable{},
 		// Hook Templates
 		&workflow.HookTemplate{},
+		// Workflow Templates（模板文件）
+		&workflow.WorkflowTemplate{},
+		// Storage（文件存储）
+		&storage.StorageFile{},
 	)
 	if err != nil {
 		return err

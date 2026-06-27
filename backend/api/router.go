@@ -120,6 +120,26 @@ func SetupRouter(cfg *config.ServerConfig, mc *cache.MachineCache, pool *serverg
 			hookTemplates.DELETE("/:id", views.DeleteHookTemplate)
 		}
 
+		// Workflow Templates（工作流模板文件管理）
+		workflowTemplates := api.Group("/workflow-templates")
+		{
+			workflowTemplates.GET("", views.ListWorkflowTemplates)
+			workflowTemplates.POST("", views.CreateWorkflowTemplate)
+			workflowTemplates.GET("/:id", views.GetWorkflowTemplate)
+			workflowTemplates.PUT("/:id", views.UpdateWorkflowTemplate)
+			workflowTemplates.DELETE("/:id", views.DeleteWorkflowTemplate)
+		}
+
+		// Storage（文件存储管理）
+		storage := api.Group("/storage")
+		{
+			storage.GET("/files", views.ListStorageFiles)
+			storage.GET("/files/:id", views.GetStorageFile)
+			storage.DELETE("/files/:id", views.DeleteStorageFile)
+			storage.POST("/upload", views.UploadChunk)
+			storage.GET("/resume-info", views.GetResumeInfo)
+		}
+
 		// Cluster management
 		clusters := api.Group("/clusters")
 		{
@@ -168,6 +188,9 @@ func SetupRouter(cfg *config.ServerConfig, mc *cache.MachineCache, pool *serverg
 	// Vue 静态资源
 	router.Static("/assets", "./dist/assets")
 	router.StaticFile("/favicon.ico", "./dist/favicon.ico")
+
+	// 文件下载路由（独立于 /api/v1，支持 wget -c 续传）
+	router.GET("/download/*path", views.DownloadFile)
 
 	// Vue 路由 history 模式支持（放在最后）
 	router.NoRoute(func(c *gin.Context) {

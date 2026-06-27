@@ -160,10 +160,10 @@ type WorkflowTaskExecution struct {
 	Host              string                 `json:"host" gorm:"size:100"`                       // 目标机器 ip:port
 	Status            string                 `json:"status" gorm:"size:20;default:pending"`       // pending/running/success/failed/skipped
 	Output            string                 `json:"output" gorm:"type:text"`                     // 标准输出
-	Stderr            string                 `json:"stderr" gorm:"type:text"`                     // 标准错误（非致命警告）
 	Error             string                 `json:"error" gorm:"type:text"`                      // 错误信息
 	ErrorCode         int32                  `json:"error_code"`                                  // 错误码
 	Changed           bool                   `json:"changed"`                                     // 是否产生变更
+	LoopItem          string                 `json:"loop_item" gorm:"size:500"`                   // 循环项（展示用）
 	HookStatus        string                 `json:"hook_status" gorm:"size:20;default:none"`     // 钩子执行状态: none/running/success/failed
 	HookError         string                 `json:"hook_error" gorm:"type:text"`                 // 钩子失败原因
 	DurationMs        int64                  `json:"duration_ms"`                                 // 执行耗时（毫秒）

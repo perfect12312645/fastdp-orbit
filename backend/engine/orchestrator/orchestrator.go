@@ -95,6 +95,7 @@ import (
 	"fastdp-orbit/backend/server/grpc"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -108,20 +109,23 @@ type EventListener interface {
 	OnExecutionStatus(executionID uint, status string, errMsg string)
 	OnGroupStatus(executionID uint, groupID uint, status string)
 	OnStageStatus(executionID uint, stageID uint, status string)
-	OnTaskStatus(executionID uint, taskID uint, status string)
+	OnTaskStatus(executionID uint, taskID uint, status string, host string, output string, errStr string, duration int64)
 }
 
 // Orchestrator 工作流执行引擎
 type Orchestrator struct {
-	mu        sync.RWMutex
-	db        *gorm.DB
-	pool      *grpc.AgentConnPool
-	listener  EventListener
-	running   map[uint]*cancelContext  // executionID -> cancel
-	cancelled map[uint]bool            // executionID -> 是否被用户终止
-	pausing   map[uint]chan struct{}   // executionID -> 暂停/失败等待通道，goroutine 阻塞于此
-	lastOp    map[uint]time.Time       // executionID -> 上次操作时间，防频繁点击
-	ctxMap    map[uint]context.Context // executionID -> 当前有效的 context（Resume/RetryStage 会更新）
+	mu         sync.RWMutex
+	db         *gorm.DB
+	pool       *grpc.AgentConnPool
+	listener   EventListener
+	running    map[uint]*cancelContext  // executionID -> cancel
+	cancelled  map[uint]bool            // executionID -> 是否被用户终止
+	pausing    map[uint]chan struct{}   // executionID -> 暂停/失败等待通道，goroutine 阻塞于此
+	lastOp     map[uint]time.Time       // executionID -> 上次操作时间，防频繁点击
+	ctxMap     map[uint]context.Context // executionID -> 当前有效的 context（Resume/RetryStage 会更新）
+	serverIP   string
+	serverPort string
+	protocol   string
 }
 
 type cancelContext struct {
@@ -129,21 +133,39 @@ type cancelContext struct {
 }
 
 // NewOrchestrator 创建执行引擎
-func NewOrchestrator(db *gorm.DB, pool *grpc.AgentConnPool) *Orchestrator {
+func NewOrchestrator(db *gorm.DB, pool *grpc.AgentConnPool, ServerListenAddr string, Protocol string) *Orchestrator {
 	return &Orchestrator{
-		db:        db,
-		pool:      pool,
-		running:   make(map[uint]*cancelContext),
-		cancelled: make(map[uint]bool),
-		pausing:   make(map[uint]chan struct{}),
-		lastOp:    make(map[uint]time.Time),
-		ctxMap:    make(map[uint]context.Context),
+		db:         db,
+		pool:       pool,
+		running:    make(map[uint]*cancelContext),
+		cancelled:  make(map[uint]bool),
+		pausing:    make(map[uint]chan struct{}),
+		lastOp:     make(map[uint]time.Time),
+		ctxMap:     make(map[uint]context.Context),
+		serverIP:   strings.Split(ServerListenAddr, ":")[0],
+		serverPort: strings.Split(ServerListenAddr, ":")[1],
+		protocol:   Protocol,
 	}
 }
 
 // SetEventListener 设置事件监听器
 func (o *Orchestrator) SetEventListener(listener EventListener) {
 	o.listener = listener
+}
+
+// GetServerIP 获取服务器IP
+func (o *Orchestrator) GetServerIP() string {
+	return o.serverIP
+}
+
+// GetServerPort 获取服务器端口
+func (o *Orchestrator) GetServerPort() string {
+	return o.serverPort
+}
+
+// GetProtocol 获取协议
+func (o *Orchestrator) GetProtocol() string {
+	return o.protocol
 }
 
 // emit 安全地触发事件
@@ -162,6 +184,12 @@ func (o *Orchestrator) emitGroup(executionID uint, groupID uint, status string) 
 func (o *Orchestrator) emitStage(executionID uint, stageID uint, status string) {
 	if o.listener != nil {
 		o.listener.OnStageStatus(executionID, stageID, status)
+	}
+}
+
+func (o *Orchestrator) emitTask(executionID uint, taskID uint, status string, host string, output string, errStr string, duration int64) {
+	if o.listener != nil {
+		o.listener.OnTaskStatus(executionID, taskID, status, host, output, errStr, duration)
 	}
 }
 
@@ -231,11 +259,40 @@ func (o *Orchestrator) Cancel(executionID uint) error {
 	cc, ok := o.running[executionID]
 	o.mu.RUnlock()
 
+	// 如果 goroutine 已不存在（服务重启导致），直接更新 DB 状态
 	if !ok {
-		return fmt.Errorf("执行实例 %d 不在运行中", executionID)
+		var exec workflow.WorkflowExecution
+		if err := o.db.First(&exec, executionID).Error; err != nil {
+			return fmt.Errorf("执行实例 %d 不存在", executionID)
+		}
+		if exec.Status != "running" && exec.Status != "paused" {
+			return fmt.Errorf("执行实例 %d 状态为 %s，无法终止", executionID, exec.Status)
+		}
+
+		now := time.Now()
+		o.db.Model(&workflow.WorkflowExecution{}).Where("id = ?", executionID).
+			Updates(map[string]interface{}{
+				"status":      "cancelled",
+				"error":       "用户终止（协程已消失）",
+				"finished_at": now,
+			})
+		o.emit(executionID, "cancelled", "")
+
+		// 跳过所有 pending/running 的记录
+		o.db.Model(&workflow.WorkflowStageGroupExecution{}).
+			Where("execution_id = ? AND status IN ?", executionID, []string{"pending", "running"}).
+			Updates(map[string]interface{}{"status": "skipped", "error": "用户终止"})
+		o.db.Model(&workflow.WorkflowStageExecution{}).
+			Where("stage_group_execution_id IN (SELECT id FROM workflow_stage_group_executions WHERE execution_id = ?) AND status IN ?", executionID, []string{"pending", "running"}).
+			Updates(map[string]interface{}{"status": "skipped", "error": "用户终止"})
+		o.db.Model(&workflow.WorkflowTaskExecution{}).
+			Where("stage_execution_id IN (SELECT id FROM workflow_stage_executions WHERE stage_group_execution_id IN (SELECT id FROM workflow_stage_group_executions WHERE execution_id = ?)) AND status IN ?", executionID, []string{"pending", "running"}).
+			Updates(map[string]interface{}{"status": "skipped", "error": "用户终止"})
+
+		return nil
 	}
 
-	// 如果 goroutine 正在 waitForResume 阻塞，关闭 channel 唤醒它
+	// goroutine 存在，正常终止流程
 	o.mu.Lock()
 	o.cancelled[executionID] = true
 	if ch, exists := o.pausing[executionID]; exists {
@@ -244,10 +301,8 @@ func (o *Orchestrator) Cancel(executionID uint) error {
 	}
 	o.mu.Unlock()
 
-	// 取消 context（当前 task 的 gRPC 调用立即失败）
 	cc.cancel()
 
-	// 更新 execution 状态为 cancelled
 	now := time.Now()
 	o.db.Model(&workflow.WorkflowExecution{}).Where("id = ?", executionID).
 		Updates(map[string]interface{}{
@@ -257,12 +312,9 @@ func (o *Orchestrator) Cancel(executionID uint) error {
 		})
 	o.emit(executionID, "cancelled", "")
 
-	// 跳过所有 pending 的 stage_group_executions
 	o.db.Model(&workflow.WorkflowStageGroupExecution{}).
 		Where("execution_id = ? AND status = ?", executionID, "pending").
 		Update("status", "skipped")
-
-	// 跳过所有 pending 的 stage_executions
 	o.db.Model(&workflow.WorkflowStageExecution{}).
 		Where("stage_group_execution_id IN (SELECT id FROM workflow_stage_group_executions WHERE execution_id = ?) AND status = ?",
 			executionID, "pending").
@@ -568,6 +620,155 @@ func (o *Orchestrator) RetryExecution(executionID uint) error {
 	return nil
 }
 
+// ExecuteSingleStage 单独执行一个阶段模板（不依赖工作流）
+func (o *Orchestrator) ExecuteSingleStage(stageTemplateID uint, machineGroupID uint) (*workflow.WorkflowExecution, error) {
+	// 1. 加载阶段模板
+	var stageTemplate workflow.StageTemplate
+	if err := o.db.First(&stageTemplate, stageTemplateID).Error; err != nil {
+		return nil, fmt.Errorf("阶段模板不存在: %v", err)
+	}
+
+	// 2. 解析任务
+	var tasks []workflow.StageTask
+	if err := json.Unmarshal([]byte(stageTemplate.Tasks), &tasks); err != nil {
+		return nil, fmt.Errorf("解析任务失败: %v", err)
+	}
+
+	// 3. 确定机器分组ID（优先使用传入的，否则使用模板默认的）
+	groupID := machineGroupID
+	if groupID == 0 {
+		groupID = stageTemplate.MachineGroupID
+	}
+	if groupID == 0 {
+		return nil, fmt.Errorf("未指定机器分组")
+	}
+
+	// 4. 加载机器分组
+	var machineGroup machine.MachineGroup
+	if err := o.db.Preload("Machines").First(&machineGroup, groupID).Error; err != nil {
+		return nil, fmt.Errorf("机器分组不存在: %v", err)
+	}
+
+	// 5. 加载全局变量
+	var globalVarList []workflow.GlobalVariable
+	o.db.Find(&globalVarList)
+	globalVars := make(map[string]interface{})
+	for _, v := range globalVarList {
+		globalVars[v.Key] = v.Value
+	}
+
+	// 6. 加载所有机器分组（供 Groups 模板变量使用）
+	var allMachineGroups []machine.MachineGroup
+	o.db.Preload("Machines").Find(&allMachineGroups)
+	groupsMap := BuildGroupsMap(allMachineGroups)
+
+	// 7. 加载钩子
+	var hooks []workflow.WorkflowHook
+	o.db.Find(&hooks)
+
+	// 8. 创建虚拟执行记录
+	execution := &workflow.WorkflowExecution{
+		WorkflowID: 0, // 无关联工作流
+		Status:     "running",
+		Trigger:    "manual",
+		StartedAt:  time.Now(),
+	}
+	if err := o.db.Create(execution).Error; err != nil {
+		return nil, fmt.Errorf("创建执行记录失败: %v", err)
+	}
+
+	// 9. 创建虚拟阶段组执行记录
+	groupExec := &workflow.WorkflowStageGroupExecution{
+		ExecutionID: execution.ID,
+		GroupID:     0, // 无关联阶段组
+		Status:      "running",
+	}
+	if err := o.db.Create(groupExec).Error; err != nil {
+		return nil, fmt.Errorf("创建阶段组执行记录失败: %v", err)
+	}
+
+	// 10. 构建 WorkflowStage（从 StageTemplate 转换）
+	stage := workflow.WorkflowStage{
+		ID:             stageTemplate.ID,
+		Name:           stageTemplate.Name,
+		Description:    stageTemplate.Description,
+		MachineGroupID: groupID,
+		MachineGroup:   &machineGroup,
+		Tasks:          make([]workflow.WorkflowTask, len(tasks)),
+	}
+	for i, t := range tasks {
+		stage.Tasks[i] = workflow.WorkflowTask{
+			ID:           uint(t.Ref),
+			Ref:          t.Ref,
+			Name:         t.Name,
+			Module:       t.Module,
+			Params:       t.Params,
+			Order:        t.Order,
+			When:         t.When,
+			HookIDs:      t.HookIDs,
+			Loop:         t.Loop,
+			Timeout:      t.Timeout,
+			IgnoreErrors: t.IgnoreErrors,
+			Retries:      t.Retries,
+			Delay:        t.Delay,
+			Register:     t.Register,
+		}
+	}
+
+	// 11. 异步执行
+	go func() {
+		// 注册到 running map，使 Cancel 可用
+		ctx, cancel := context.WithCancel(context.Background())
+		o.mu.Lock()
+		o.running[execution.ID] = &cancelContext{cancel: cancel}
+		o.ctxMap[execution.ID] = ctx
+		o.mu.Unlock()
+
+		defer func() {
+			o.mu.Lock()
+			delete(o.running, execution.ID)
+			delete(o.cancelled, execution.ID)
+			delete(o.ctxMap, execution.ID)
+			o.mu.Unlock()
+		}()
+
+		o.emit(execution.ID, "running", "")
+		o.emitStage(execution.ID, stage.ID, "running")
+
+		failed := o.executeStage(ctx, execution, groupExec, stage, hooks, globalVars, groupsMap)
+
+		// 更新执行状态
+		now := time.Now()
+		if failed {
+			o.db.Model(execution).Updates(map[string]interface{}{
+				"status":      "failed",
+				"error":       "阶段执行失败",
+				"finished_at": now,
+			})
+			o.db.Model(groupExec).Updates(map[string]interface{}{
+				"status":      "failed",
+				"error":       "阶段执行失败",
+				"finished_at": now,
+			})
+			o.emit(execution.ID, "failed", "阶段执行失败")
+			o.emitStage(execution.ID, stage.ID, "failed")
+		} else {
+			o.db.Model(execution).Updates(map[string]interface{}{
+				"status":      "success",
+				"finished_at": now,
+			})
+			o.db.Model(groupExec).Updates(map[string]interface{}{
+				"status":      "success",
+				"finished_at": now,
+			})
+			o.emit(execution.ID, "success", "")
+			o.emitStage(execution.ID, stage.ID, "success")
+		}
+	}()
+
+	return execution, nil
+}
+
 // run 执行工作流主循环
 func (o *Orchestrator) run(ctx context.Context, execution *workflow.WorkflowExecution) {
 	defer func() {
@@ -627,7 +828,7 @@ func (o *Orchestrator) run(ctx context.Context, execution *workflow.WorkflowExec
 		o.failExecution(execution, fmt.Sprintf("加载所有机器分组失败: %v", err))
 		return
 	}
-	groupsMap := buildGroupsMap(allMachineGroups)
+	groupsMap := BuildGroupsMap(allMachineGroups)
 
 	// 按 Order 排序 stage_groups
 	groups := wf.StageGroups
@@ -977,11 +1178,14 @@ func (o *Orchestrator) executeStage(ctx context.Context, execution *workflow.Wor
 						}
 					}(m)
 				}
-				wg.Wait()
+					wg.Wait()
 
 				o.db.Transaction(func(tx *gorm.DB) error {
 					taskExecs.Range(func(key, value interface{}) bool {
-						tx.Save(value.(*workflow.WorkflowTaskExecution))
+						te := value.(*workflow.WorkflowTaskExecution)
+						tx.Save(te)
+						// 广播任务状态（带详细信息）
+						o.emitTask(execution.ID, te.TaskID, te.Status, te.Host, te.Output, te.Error, te.DurationMs)
 						return true
 					})
 					return nil
@@ -1037,7 +1241,10 @@ func (o *Orchestrator) executeStage(ctx context.Context, execution *workflow.Wor
 			// 批量写入所有 taskExec，一次事务
 			o.db.Transaction(func(tx *gorm.DB) error {
 				taskExecs.Range(func(key, value interface{}) bool {
-					tx.Save(value.(*workflow.WorkflowTaskExecution))
+					te := value.(*workflow.WorkflowTaskExecution)
+					tx.Save(te)
+					// 广播任务状态（带详细信息）
+					o.emitTask(execution.ID, te.TaskID, te.Status, te.Host, te.Output, te.Error, te.DurationMs)
 					return true
 				})
 				return nil
@@ -1082,7 +1289,7 @@ func (o *Orchestrator) executeStage(ctx context.Context, execution *workflow.Wor
 func (o *Orchestrator) executeTask(ctx context.Context, taskExec *workflow.WorkflowTaskExecution, task *workflow.WorkflowTask, m *machine.Machine, hooks []workflow.WorkflowHook, params map[string]string, globalVars map[string]interface{}, groupVars map[string]interface{}, groupsMap map[string]interface{}, loopItem interface{}, registeredVars map[string]map[string]map[string]interface{}, registeredVarsMu *sync.RWMutex) {
 	host := fmt.Sprintf("%s:%d", m.IP, m.Port)
 
-	machineMap := machineToMap(m)
+	machineMap := MachineToMap(m)
 
 	// 构建当前机器的 register 变量（per-machine，只取当前 host 的数据）
 	currentRegister := make(map[string]interface{})
@@ -1101,6 +1308,11 @@ func (o *Orchestrator) executeTask(ctx context.Context, taskExec *workflow.Workf
 		"Group":          groupVars,
 		"Groups":         groupsMap,
 		"Register":       currentRegister,
+		"Server": map[string]interface{}{
+			"ip":       o.serverIP,
+			"port":     o.serverPort,
+			"protocol": o.protocol,
+		},
 	}
 	if loopItem != nil {
 		templateVars["item"] = loopItem
@@ -1114,6 +1326,7 @@ func (o *Orchestrator) executeTask(ctx context.Context, taskExec *workflow.Workf
 			"Group":          groupVars,
 			"Groups":         groupsMap,
 			"Register":       currentRegister,
+			"Server":         templateVars["Server"],
 		}
 		if loopItem != nil {
 			whenVars["item"] = loopItem
@@ -1134,7 +1347,7 @@ func (o *Orchestrator) executeTask(ctx context.Context, taskExec *workflow.Workf
 	// 对 params 的每个 value 做模板渲染
 	renderedParams := make(map[string]string)
 	for k, v := range params {
-		rendered, err := renderWhenTemplate(v, templateVars)
+		rendered, err := RenderTemplate(v, templateVars)
 		if err != nil {
 			// 渲染失败时原样使用（含非法模板语法的情况，如 {{xxx}}）
 			renderedParams[k] = v
@@ -1160,7 +1373,7 @@ func (o *Orchestrator) executeTask(ctx context.Context, taskExec *workflow.Workf
 			var tpl workflow.WorkflowTemplate
 			if err := o.db.Where("name = ?", srcVal).First(&tpl).Error; err == nil {
 				// 渲染模板内容
-				rendered, err := renderWhenTemplate(tpl.Content, templateVars)
+				rendered, err := RenderTemplate(tpl.Content, templateVars)
 				if err != nil {
 					logger.Warn("template模块渲染模板失败", zap.String("src", srcVal), zap.Error(err))
 					taskExec.Status = "failed"
@@ -1349,7 +1562,7 @@ func (o *Orchestrator) executeHooks(ctx context.Context, host string, hookIDsJSO
 		}
 		renderedParams := make(map[string]string)
 		for k, v := range params {
-			rendered, err := renderWhenTemplate(v, templateVars)
+			rendered, err := RenderTemplate(v, templateVars)
 			if err != nil {
 				renderedParams[k] = v
 			} else {
@@ -1454,8 +1667,8 @@ func (o *Orchestrator) failExecution(execution *workflow.WorkflowExecution, errM
 	)
 }
 
-// machineToMap 将 Machine 对象转换为模板可用的 map
-func machineToMap(m *machine.Machine) map[string]interface{} {
+// MachineToMap 将 Machine 对象转换为模板可用的 map
+func MachineToMap(m *machine.Machine) map[string]interface{} {
 	disks := make([]map[string]interface{}, 0)
 	for _, d := range m.Disks {
 		disks = append(disks, map[string]interface{}{
@@ -1506,13 +1719,13 @@ func machineToMap(m *machine.Machine) map[string]interface{} {
 	}
 }
 
-// buildGroupsMap 将所有机器分组转换为模板变量格式：map[组名][]map[属性名]值
-func buildGroupsMap(groups []machine.MachineGroup) map[string]interface{} {
+// BuildGroupsMap 将所有机器分组转换为模板变量格式：map[组名][]map[属性名]值
+func BuildGroupsMap(groups []machine.MachineGroup) map[string]interface{} {
 	result := make(map[string]interface{})
 	for _, g := range groups {
 		machines := make([]map[string]interface{}, 0, len(g.Machines))
 		for i := range g.Machines {
-			machines = append(machines, machineToMap(&g.Machines[i]))
+			machines = append(machines, MachineToMap(&g.Machines[i]))
 		}
 		result[g.Name] = machines
 	}

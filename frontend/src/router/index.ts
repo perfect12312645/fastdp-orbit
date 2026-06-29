@@ -29,28 +29,10 @@ const routes: RouteRecordRaw[] = [
       },
 
       {
-        path: 'gpu',
-        name: 'GpuResource',
-        component: () => import('@/pages/GpuResource.vue'),
-        meta: { title: 'GPU资源管理', icon: 'Cpu', hidden: true },
-      },
-      {
-        path: 'model-service',
-        name: 'ModelService',
-        component: () => import('@/pages/ModelService.vue'),
-        meta: { title: '大模型服务', icon: 'Connection' },
-      },
-      {
         path: 'storage',
         name: 'StorageManagement',
         component: () => import('@/pages/StorageManagement.vue'),
         meta: { title: '存储管理', icon: 'Box' },
-      },
-      {
-        path: 'cluster',
-        name: 'ClusterDeployment',
-        component: () => import('@/pages/ClusterDeployment.vue'),
-        meta: { title: '集群部署', icon: 'Share' },
       },
       {
         path: 'workflow',
@@ -92,13 +74,13 @@ const routes: RouteRecordRaw[] = [
         path: 'workflow-templates',
         name: 'WorkflowTemplateManagement',
         component: () => import('@/pages/WorkflowTemplateManagement.vue'),
-        meta: { title: '模板文件', icon: 'Document' },
+        meta: { title: '配置模板', icon: 'Document' },
       },
       {
-        path: 'testing',
-        name: 'AutoTesting',
-        component: () => import('@/pages/AutoTesting.vue'),
-        meta: { title: '自动化测试', icon: 'Finished' },
+        path: 'solution-library',
+        name: 'SolutionLibraryManagement',
+        component: () => import('@/pages/SolutionLibraryManagement.vue'),
+        meta: { title: '方案库', icon: 'Package' },
       },
       {
         path: 'settings',

@@ -21,12 +21,12 @@ import (
 	"fastdp-orbit/backend/pkg/version"
 	"fastdp-orbit/backend/server/cache"
 	servergrpc "fastdp-orbit/backend/server/grpc"
-	workflowsvc "fastdp-orbit/backend/services/workflow"
 	storagesvc "fastdp-orbit/backend/services/storage"
+	workflowsvc "fastdp-orbit/backend/services/workflow"
 
 	"go.uber.org/zap"
-	"gorm.io/gorm"
 	"google.golang.org/grpc"
+	"gorm.io/gorm"
 )
 
 func main() {
@@ -106,8 +106,12 @@ func main() {
 	// 注入机器分组数据库
 	views.MachineGroupDB = db
 
+	Protocol := "http"
+	if cfg.OrbitServer.TLS.Enabled {
+		Protocol = "https"
+	}
 	// 创建执行引擎
-	eng := orchestrator.NewOrchestrator(db, agentConnPool)
+	eng := orchestrator.NewOrchestrator(db, agentConnPool, cfg.GetServerListenAddr(), Protocol)
 	views.Orchestrator = eng
 
 	// 设置 SSE 事件监听器

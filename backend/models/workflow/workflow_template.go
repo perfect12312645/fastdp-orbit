@@ -11,8 +11,9 @@ type WorkflowTemplate struct {
 	ID          uint           `json:"id" gorm:"primaryKey"`
 	Name        string         `json:"name" gorm:"size:100;not null"`
 	Description string         `json:"description" gorm:"size:500"`
-	Content     string         `json:"content" gorm:"type:text"`   // Go template 语法内容
-	Variables   string         `json:"variables" gorm:"type:text"` // 变量说明文档（JSON格式）
+	Content     string         `json:"content" gorm:"type:text"`                // Go template 语法内容
+	Variables   string         `json:"variables" gorm:"type:text"`              // 变量说明文档（JSON格式）
+	Source      string         `json:"source" gorm:"size:100;index;default:''"` // 来源（模板包名）
 	CreatedAt   time.Time      `json:"created_at"`
 	UpdatedAt   time.Time      `json:"updated_at"`
 	DeletedAt   gorm.DeletedAt `json:"-" gorm:"index"`

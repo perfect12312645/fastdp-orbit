@@ -20,6 +20,9 @@ type SSEEvent struct {
 	StageID     uint   `json:"stage_id,omitempty"`
 	TaskID      uint   `json:"task_id,omitempty"`
 	Error       string `json:"error,omitempty"`
+	Output      string `json:"output,omitempty"`
+	Duration    int64  `json:"duration_ms,omitempty"`
+	Host        string `json:"host,omitempty"`
 }
 
 // SSEClient SSE 客户端
@@ -166,11 +169,15 @@ func BroadcastStageStatus(executionID uint, stageID uint, status string) {
 }
 
 // BroadcastTaskStatus 广播任务状态变更
-func BroadcastTaskStatus(executionID uint, taskID uint, status string) {
+func BroadcastTaskStatus(executionID uint, taskID uint, status string, host string, output string, errStr string, duration int64) {
 	Hub.Broadcast(SSEEvent{
 		ExecutionID: executionID,
 		Type:        "task_status",
 		TaskID:      taskID,
 		Status:      status,
+		Host:        host,
+		Output:      output,
+		Error:       errStr,
+		Duration:    duration,
 	})
 }

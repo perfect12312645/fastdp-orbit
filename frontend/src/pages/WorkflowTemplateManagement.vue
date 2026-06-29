@@ -13,29 +13,41 @@
     </div>
 
     <div class="page-content">
-      <div class="table-toolbar">
-        <div class="table-toolbar-left">
-          <el-input v-model="searchText" placeholder="搜索模板名称" clearable style="width: 240px;">
-            <template #prefix>
-              <Icon icon="mdi:magnify" :size="16" />
-            </template>
-          </el-input>
+        <div class="table-toolbar">
+          <div class="table-toolbar-left">
+            <el-input v-model="searchText" placeholder="搜索模板名称" clearable style="width: 240px;">
+              <template #prefix>
+                <Icon icon="mdi:magnify" :size="16" />
+              </template>
+            </el-input>
+            <el-select v-model="selectedGroup" placeholder="全部分组" clearable style="width: 160px;">
+              <el-option v-for="g in availableGroups" :key="g" :label="g || '(默认)'" :value="g" />
+            </el-select>
+          </div>
+          <div class="table-toolbar-right">
+            <span class="total-text">共 {{ filteredTemplates.length }} 个模板</span>
+          </div>
         </div>
-        <div class="table-toolbar-right">
-          <span class="total-text">共 {{ filteredTemplates.length }} 个模板</span>
-        </div>
-      </div>
 
-      <el-table :data="filteredTemplates" v-loading="loading" stripe>
-        <el-table-column label="名称" prop="name" min-width="150" />
-        <el-table-column label="描述" prop="description" min-width="200" show-overflow-tooltip />
+        <el-table :data="filteredTemplates" v-loading="loading" stripe>
+          <el-table-column label="名称" prop="name" min-width="150" />
+          <el-table-column label="描述" prop="description" min-width="200" show-overflow-tooltip />
+          <el-table-column label="分组" width="120">
+            <template #default="{ row }">
+              <el-tag v-if="row.source" size="small" type="info" effect="plain">{{ row.source }}</el-tag>
+              <span v-else class="text-muted">-</span>
+            </template>
+          </el-table-column>
         <el-table-column label="更新时间" width="180">
           <template #default="{ row }">
             {{ formatDateTime(row.updated_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="160" fixed="right">
+        <el-table-column label="操作" width="220" fixed="right">
           <template #default="{ row }">
+            <el-button type="success" link size="small" @click="showPreviewDialog(row)">
+              <Icon icon="mdi:eye" :size="14" /> 预览
+            </el-button>
             <el-button type="primary" link size="small" @click="editTemplate(row)">
               <Icon icon="mdi:pencil" :size="14" /> 编辑
             </el-button>
@@ -80,6 +92,9 @@
                     :machine-groups="machineGroupsForPicker"
                     @select="(expr: string) => { insertVariable(expr) }"
                   />
+                  <el-button size="small" @click="showPreviewDialog">
+                    <Icon icon="mdi:eye" :size="14" /> 预览
+                  </el-button>
                 </div>
                 <codemirror
                   v-model="form.content"
@@ -88,6 +103,7 @@
                   :tab-size="2"
                   :indent-with-tab="true"
                   placeholder="使用 Go template 语法，如：{{.Machine.ip}}、{{.GlobalVariable.key}}"
+                  @ready="onEditorReady"
                 />
               </div>
             </el-form-item>
@@ -135,9 +151,12 @@
             </div>
             <div class="var-ref-group">
               <div class="var-ref-title">所有分组（循环）</div>
-              <div class="var-ref-item" v-for="g in machineGroupsForPicker" :key="g.name">
+              <div class="var-ref-item" v-for="g in machineGroupsForPicker.slice(0, 2)" :key="g.name">
                 <code @click="insertGroupsLoop(g.name)">{{ groupsVarText(g.name) }}</code>
                 <span>{{ g.count }} 台机器</span>
+              </div>
+              <div class="var-ref-hint" v-if="machineGroupsForPicker.length > 2">
+                共 {{ machineGroupsForPicker.length }} 个分组，使用「插入变量」按钮查看全部
               </div>
               <div class="var-ref-hint">
                 循环内可用属性：ip, hostname, os_name, os_version, arch, kernel, cpu_model, cpu_cores, memory_kb, swap_kb, gateway, virtualization, timezone<br>
@@ -146,9 +165,46 @@
             </div>
             <div class="var-ref-group">
               <div class="var-ref-title">全局变量</div>
-              <div class="var-ref-item" v-for="v in globalVars" :key="v.key">
+              <div class="var-ref-item" v-for="v in globalVars.slice(0, 2)" :key="v.key">
                 <code @click="insertVariable(globalVarExpr(v.key))">{{ globalVarText(v.key) }}</code>
                 <span>{{ v.description || v.key }}</span>
+              </div>
+              <div class="var-ref-hint" v-if="globalVars.length > 2">
+                共 {{ globalVars.length }} 个变量，使用「插入变量」按钮查看全部
+              </div>
+              <div class="var-ref-hint" v-else-if="globalVars.length === 0">
+                暂无全局变量，可在「全局变量」页面创建
+              </div>
+            </div>
+
+            <h4 style="margin-top: 16px;">自定义函数</h4>
+            <div class="var-ref-group">
+              <div class="var-ref-title">文件与编码</div>
+              <div class="var-ref-item">
+                <code @click="insertVariable(funcExpr('lookup', '/path/to/file'))">lookup</code>
+                <span>读取文件内容</span>
+              </div>
+              <div class="var-ref-hint">
+                示例：&#123;&#123; lookup "/etc/kubernetes/pki/ca.pem" &#125;&#125;<br>
+                管道：&#123;&#123; lookup "/path" | b64encode &#125;&#125;
+              </div>
+              <div class="var-ref-item">
+                <code @click="insertVariable(funcExpr('b64encode', 'text'))">b64encode</code>
+                <span>Base64编码</span>
+              </div>
+              <div class="var-ref-item">
+                <code @click="insertVariable(funcExpr('lower', 'STRING'))">lower</code>
+                <span>转小写</span>
+              </div>
+            </div>
+            <div class="var-ref-group">
+              <div class="var-ref-title">常用管道语法</div>
+              <div class="var-ref-hint">
+                <code>default</code>：&#123;&#123; .Key | default "N/A" &#125;&#125;<br>
+                <code>printf</code>：&#123;&#123; printf "%s:%d" .ip .port &#125;&#125;<br>
+                <code>if</code>：&#123;&#123; if .Key &#125;&#125;...&#123;&#123; else &#125;&#125;...&#123;&#123; end &#125;&#125;<br>
+                <code>range</code>：&#123;&#123; range .List &#125;&#125;...&#123;&#123; end &#125;&#125;<br>
+                <code>index</code>：&#123;&#123; index .Groups "name" 0 &#125;&#125;
               </div>
             </div>
           </div>
@@ -160,6 +216,34 @@
         <el-button type="primary" @click="handleSubmit" :loading="submitting">
           {{ editingId ? '保存' : '创建' }}
         </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 预览对话框 -->
+    <el-dialog
+      v-model="previewVisible"
+      title="模板预览"
+      width="700px"
+      destroy-on-close
+    >
+      <div class="preview-toolbar">
+        <span style="font-size: 13px; color: var(--el-text-color-secondary);">选择机器（使用该机器数据渲染）：</span>
+        <el-select-v2
+          v-model="previewMachineId"
+          :options="machineOptions"
+          placeholder="选择机器"
+          filterable
+          clearable
+          style="width: 300px; margin-left: 8px;"
+          @change="doPreview"
+        />
+      </div>
+      <div class="preview-result" v-loading="previewLoading">
+        <pre v-if="previewContent">{{ previewContent }}</pre>
+        <div v-else class="preview-empty">选择机器后自动渲染预览</div>
+      </div>
+      <template #footer>
+        <el-button @click="previewVisible = false">关闭</el-button>
       </template>
     </el-dialog>
   </div>
@@ -180,6 +264,7 @@ import {
   createWorkflowTemplateApi,
   updateWorkflowTemplateApi,
   deleteWorkflowTemplateApi,
+  previewWorkflowTemplateApi,
   type WorkflowTemplate,
 } from '@/api/workflowTemplate'
 import VariablePicker from '@/components/VariablePicker.vue'
@@ -188,16 +273,28 @@ const codemirrorExtensions = [oneDark]
 
 const loading = ref(false)
 const searchText = ref('')
+const selectedGroup = ref('')
 const templates = ref<WorkflowTemplate[]>([])
 const globalVars = ref<GlobalVariable[]>([])
 const machineGroups = ref<MachineGroup[]>([])
 
 const filteredTemplates = computed(() => {
-  if (!searchText.value) return templates.value
-  const kw = searchText.value.toLowerCase()
-  return templates.value.filter(
-    (t) => t.name.toLowerCase().includes(kw) || t.description.toLowerCase().includes(kw)
-  )
+  let result = templates.value
+  if (selectedGroup.value) {
+    result = result.filter(t => t.source === selectedGroup.value)
+  }
+  if (searchText.value) {
+    const kw = searchText.value.toLowerCase()
+    result = result.filter(
+      (t) => t.name.toLowerCase().includes(kw) || t.description.toLowerCase().includes(kw)
+    )
+  }
+  return result
+})
+
+const availableGroups = computed(() => {
+  const groups = new Set(templates.value.map(t => t.source).filter(Boolean))
+  return Array.from(groups).sort()
 })
 
 const machineGroupsForPicker = computed(() => {
@@ -274,11 +371,32 @@ function globalVarText(key: string) {
   return `{{ .GlobalVariable.${key} }}`
 }
 
+function funcExpr(name: string, arg: string) {
+  return `{{ ${name} "${arg}" }}`
+}
+
 // ==================== 编辑器 ====================
 const editorView = ref<any>(null)
 
+function onEditorReady(payload: { view: any }) {
+  editorView.value = payload.view
+}
+
 function insertVariable(expr: string) {
-  form.value.content += expr
+  if (editorView.value) {
+    // 在光标位置插入
+    const view = editorView.value
+    const pos = view.state.selection.main.head
+    view.dispatch({
+      changes: { from: pos, insert: expr },
+      selection: { anchor: pos + expr.length },
+    })
+    // 同步到 form.content
+    form.value.content = view.state.doc.toString()
+  } else {
+    // 降级：追加到末尾
+    form.value.content += expr
+  }
 }
 
 function insertGroupsLoop(groupName: string) {
@@ -307,6 +425,60 @@ const dialogVisible = ref(false)
 const editingId = ref(0)
 const submitting = ref(false)
 const formRef = ref()
+
+// 预览相关
+const previewVisible = ref(false)
+const previewMachineId = ref(0)
+const previewContent = ref('')
+const previewLoading = ref(false)
+const previewTemplate = ref<WorkflowTemplate | null>(null)
+
+// 机器列表（用于预览选择）
+const allMachines = ref<any[]>([])
+
+const machineOptions = computed(() => [
+  { value: 0, label: '使用示例数据' },
+  ...allMachines.value.map((m: any) => ({
+    value: m.id,
+    label: `${m.hostname || m.ip} (${m.ip}:${m.port})`,
+  }))
+])
+
+function showPreviewDialog(row: WorkflowTemplate) {
+  previewTemplate.value = row
+  previewMachineId.value = 0
+  previewContent.value = ''
+  previewVisible.value = true
+  // 加载机器列表
+  loadMachinesForPreview()
+}
+
+async function loadMachinesForPreview() {
+  try {
+    const { getMachinesApi } = await import('@/api/machine')
+    allMachines.value = await getMachinesApi()
+  } catch {
+    allMachines.value = []
+  }
+  doPreview()
+}
+
+async function doPreview() {
+  const content = previewTemplate.value?.content || form.value.content
+  if (!content?.trim()) {
+    previewContent.value = ''
+    return
+  }
+  previewLoading.value = true
+  try {
+    previewContent.value = await previewWorkflowTemplateApi(content, previewMachineId.value || undefined)
+  } catch (e: any) {
+    previewContent.value = '渲染失败: ' + (e?.message || '未知错误')
+  } finally {
+    previewLoading.value = false
+  }
+}
+
 const form = ref({
   name: '',
   description: '',
@@ -547,6 +719,40 @@ onMounted(loadData)
 
 .total-text {
   color: #909399;
+  font-size: 13px;
+}
+
+/* 预览样式 */
+.preview-toolbar {
+  display: flex;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+
+.preview-result {
+  min-height: 200px;
+  max-height: 500px;
+  overflow: auto;
+  background: var(--el-fill-color-lighter);
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.preview-result pre {
+  margin: 0;
+  font-family: monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.preview-empty {
+  text-align: center;
+  color: var(--el-text-color-placeholder);
+  padding: 40px;
   font-size: 13px;
 }
 </style>

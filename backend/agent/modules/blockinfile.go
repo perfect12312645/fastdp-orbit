@@ -26,8 +26,8 @@ func NewBlockinfileModule() Module {
 
 // 固定的标记常量（无需用户输入）
 const (
-	MarkerBegin = "# BEGIN FASTDP-OPS MANAGED BLOCK" // 开始标记
-	MarkerEnd   = "# END FASTDP-OPS MANAGED BLOCK"   // 结束标记
+	MarkerBegin = "# BEGIN FASTDP-ORBIT MANAGED BLOCK" // 开始标记
+	MarkerEnd   = "# END FASTDP-ORBIT MANAGED BLOCK"   // 结束标记
 )
 
 // 操作类型常量（仅保留声明式操作）

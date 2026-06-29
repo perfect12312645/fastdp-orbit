@@ -1,8 +1,10 @@
 package orchestrator
 
 import (
+	"encoding/base64"
 	"fmt"
 	"html/template"
+	"os"
 	"strings"
 )
 
@@ -14,6 +16,26 @@ const (
 	opNotEqual    = "!="
 )
 
+// 自定义模板函数（供模板渲染和 when 条件使用）
+var customFuncMap = template.FuncMap{
+	// lookup：读取文件内容
+	"lookup": func(path string) (string, error) {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return "", fmt.Errorf("读取文件 %s 失败: %w", path, err)
+		}
+		return string(content), nil
+	},
+	// b64encode：Base64编码
+	"b64encode": func(input string) string {
+		return base64.StdEncoding.EncodeToString([]byte(input))
+	},
+	// lower：转小写
+	"lower": func(s string) string {
+		return strings.ToLower(s)
+	},
+}
+
 // evaluateWhen 渲染 when 模板表达式并判断条件是否满足
 // 支持格式：
 //   - "{{.machine.os_name}} == 'ubuntu'"
@@ -21,16 +43,16 @@ const (
 //   - "{{.machine.os_name}} contains 'ubuntu'"
 //   - "{{.machine.hostname}} !contains 'test'"
 func evaluateWhen(when string, vars map[string]interface{}) (bool, error) {
-	rendered, err := renderWhenTemplate(when, vars)
+	rendered, err := RenderTemplate(when, vars)
 	if err != nil {
 		return false, fmt.Errorf("渲染 when 条件失败: %w", err)
 	}
 	return evaluateExpression(rendered)
 }
 
-// renderWhenTemplate 使用 Go template 渲染 表达式中的变量
-func renderWhenTemplate(when string, vars map[string]interface{}) (string, error) {
-	tpl, err := template.New("when").Parse(when)
+// RenderTemplate 使用 Go template 渲染字符串（支持自定义函数）
+func RenderTemplate(tplStr string, vars map[string]interface{}) (string, error) {
+	tpl, err := template.New("tpl").Funcs(customFuncMap).Parse(tplStr)
 	if err != nil {
 		return "", err
 	}

@@ -325,6 +325,24 @@ async function handleRetryExecution() {
   }
 }
 
+async function handleRunningAction(command: string) {
+  if (command === 'retry') {
+    try {
+      await ElMessageBox.confirm(
+        '确认强制重试？适用于服务重启后执行卡死的情况，将从失败处重新执行。',
+        '强制重试',
+        { confirmButtonText: '确认重试', cancelButtonText: '取消', type: 'warning' }
+      )
+      await retryExecutionApi(workflowId.value, executionId.value)
+      ElMessage.success('已触发重试')
+      await loadExecution()
+      connectSSE()
+    } catch (e) {
+      if (e !== 'cancel') ElMessage.error('重试失败')
+    }
+  }
+}
+
 async function handleRetryStage(stageId: number) {
   try {
     await retryStageApi(workflowId.value, executionId.value, stageId)

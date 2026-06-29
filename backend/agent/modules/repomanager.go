@@ -480,6 +480,7 @@ func testDebRepo(repoURL string) (*repoActionResult, error) {
 	// 简单测试：尝试获取Release文件
 	testURL := strings.TrimSuffix(repoURL, "/") + "/Release"
 	cmd := exec.Command("curl", "-sI", testURL)
+	logger.Info("", zap.String("testURL", testURL))
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("测试APT仓库失败: %w", err)
@@ -500,7 +501,9 @@ func testYumRepo(repoURL string) (*repoActionResult, error) {
 	// 使用curl测试baseurl是否可达
 	testURL := strings.TrimSuffix(repoURL, "/") + "/repodata/repomd.xml"
 	cmd := exec.Command("curl", "-sI", testURL)
+	logger.Info("", zap.String("testURL", testURL))
 	output, err := cmd.CombinedOutput()
+	logger.Info("", zap.String("string(output)", string(output)))
 	if err != nil {
 		return nil, fmt.Errorf("测试YUM仓库失败: %w", err)
 	}

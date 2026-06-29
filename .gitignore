@@ -19,5 +19,6 @@ frontend/.env*
 tmp/
 .idea
 .codegraph
+.omo
 
 

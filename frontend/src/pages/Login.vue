@@ -112,10 +112,10 @@ const loading = ref(false)
 const rememberMe = ref(false)
 
 const features = [
-  { icon: 'mdi:chip-outline', text: 'GPU资源实时监控' },
-  { icon: 'mdi:server-network-outline', text: '集群节点统一管理' },
-  { icon: 'mdi:robot-outline', text: '大模型服务编排' },
-  { icon: 'mdi:chart-line', text: '可视化数据分析' },
+  { icon: 'mdi:view-dashboard-outline', text: '可视化基础设施编排' },
+  { icon: 'mdi:server-network-outline', text: '机器节点统一管理' },
+  { icon: 'mdi:play-circle-outline', text: '工作流自动化执行' },
+  { icon: 'mdi:package-variant-closed', text: '模板市场一键部署' },
 ]
 
 const loginForm = reactive({

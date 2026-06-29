@@ -66,18 +66,29 @@
         <el-upload
           ref="uploadRef"
           drag
+          multiple
           :auto-upload="false"
-          :limit="1"
           :on-change="handleFileChange"
-          :on-exceed="handleExceed"
           :before-upload="beforeUpload"
         >
           <Icon icon="mdi:cloud-upload-outline" :size="48" style="color: var(--el-color-primary)" />
-          <div class="el-upload__text">拖拽文件到此处，或 <em>点击选择</em></div>
+          <div class="el-upload__text">拖拽文件到此处，或 <em>点击选择</em>（支持多选）</div>
           <template #tip>
             <div class="el-upload__tip">支持大文件分片上传，中断后可自动续传</div>
           </template>
         </el-upload>
+
+        <!-- 已选文件列表 -->
+        <div v-if="selectedFiles.length > 0 && !uploading" class="selected-files">
+          <div v-for="(f, i) in selectedFiles" :key="i" class="selected-file-item">
+            <Icon icon="mdi:file-outline" :size="16" />
+            <span class="file-name">{{ f.name }}</span>
+            <span class="file-size">{{ formatSize(f.size) }}</span>
+            <el-button link type="danger" size="small" @click="selectedFiles.splice(i, 1)">
+              <Icon icon="mdi:close" :size="14" />
+            </el-button>
+          </div>
+        </div>
 
         <!-- 上传进度 -->
         <div v-if="uploading" class="upload-progress">
@@ -87,15 +98,15 @@
           </div>
           <el-progress :percentage="uploadPercent" :status="uploadPercent === 100 ? 'success' : ''" />
           <div class="progress-detail">
-            分块 {{ currentChunk }} / {{ totalChunks }}
+            文件 {{ currentFileIndex + 1 }} / {{ selectedFiles.length }} · 分块 {{ currentChunk }} / {{ totalChunks }}
           </div>
         </div>
       </div>
 
       <template #footer>
         <el-button @click="uploadDialogVisible = false" :disabled="uploading">取消</el-button>
-        <el-button type="primary" @click="startUpload" :loading="uploading" :disabled="!selectedFile">
-          {{ uploading ? '上传中...' : '开始上传' }}
+        <el-button type="primary" @click="startUpload" :loading="uploading" :disabled="selectedFiles.length === 0">
+          {{ uploading ? '上传中...' : `开始上传 (${selectedFiles.length})` }}
         </el-button>
       </template>
     </el-dialog>
@@ -125,13 +136,14 @@ const searchText = ref('')
 // ==================== 上传相关 ====================
 const uploadDialogVisible = ref(false)
 const uploadRef = ref<UploadInstance>()
-const selectedFile = ref<File | null>(null)
+const selectedFiles = ref<File[]>([])
 const uploading = ref(false)
 const uploadPercent = ref(0)
 const uploadFileName = ref('')
 const uploadStatusText = ref('')
 const currentChunk = ref(0)
 const totalChunks = ref(0)
+const currentFileIndex = ref(0)
 
 const CHUNK_SIZE = 5 * 1024 * 1024 // 5MB
 
@@ -155,35 +167,50 @@ function debounceSearch() {
 
 // ==================== 上传逻辑 ====================
 function showUploadDialog() {
-  selectedFile.value = null
+  selectedFiles.value = []
   uploading.value = false
   uploadPercent.value = 0
   uploadFileName.value = ''
   uploadStatusText.value = ''
   currentChunk.value = 0
   totalChunks.value = 0
+  currentFileIndex.value = 0
   uploadDialogVisible.value = true
 }
 
 function handleFileChange(file: UploadFile) {
-  selectedFile.value = file.raw || null
-}
-
-function handleExceed() {
-  ElMessage.warning('只能选择一个文件')
+  if (file.raw) {
+    selectedFiles.value.push(file.raw)
+  }
 }
 
 function beforeUpload(file: UploadRawFile) {
-  selectedFile.value = file
+  selectedFiles.value.push(file)
   return false // 阻止自动上传
 }
 
 async function startUpload() {
-  if (!selectedFile.value) return
+  if (selectedFiles.value.length === 0) return
 
-  const file = selectedFile.value
-  uploadFileName.value = file.name
   uploading.value = true
+
+  for (let i = 0; i < selectedFiles.value.length; i++) {
+    currentFileIndex.value = i
+    const file = selectedFiles.value[i]
+    await uploadSingleFile(file)
+  }
+
+  uploading.value = false
+  ElMessage.success(`${selectedFiles.value.length} 个文件上传完成`)
+  selectedFiles.value = []
+  loadFiles()
+  setTimeout(() => {
+    uploadDialogVisible.value = false
+  }, 1000)
+}
+
+async function uploadSingleFile(file: File) {
+  uploadFileName.value = file.name
   uploadPercent.value = 0
 
   // 计算总分块数
@@ -191,58 +218,59 @@ async function startUpload() {
   if (totalChunks.value === 0) totalChunks.value = 1
 
   // 检查是否有续传信息
+  let startChunk = 0
   try {
     const resumeInfo = await getResumeInfoApi(file.name)
     if (resumeInfo.file_exists && resumeInfo.uploaded_chunks > 0) {
-      currentChunk.value = resumeInfo.uploaded_chunks
-      uploadStatusText.value = `续传中，已上传 ${resumeInfo.uploaded_chunks} 块`
-      ElMessage.info(`检测到已上传部分，从第 ${resumeInfo.uploaded_chunks + 1} 块继续`)
+      // 同名文件已存在，让用户选择
+      const action = await ElMessageBox.confirm(
+        `文件「${file.name}」已存在（已上传 ${resumeInfo.uploaded_chunks} 块），如何处理？`,
+        '文件已存在',
+        {
+          confirmButtonText: '续传',
+          cancelButtonText: '覆盖',
+          distinguishCancelAndClose: true,
+          type: 'warning',
+        }
+      ).catch((action: string) => action)
+
+      if (action === 'cancel') {
+        // 覆盖：从头开始上传
+        startChunk = 0
+        uploadStatusText.value = '覆盖上传中...'
+      } else {
+        // 续传
+        startChunk = resumeInfo.uploaded_chunks
+        uploadStatusText.value = `续传中，已上传 ${resumeInfo.uploaded_chunks} 块`
+      }
     } else {
-      currentChunk.value = 0
       uploadStatusText.value = '上传中...'
     }
   } catch {
-    currentChunk.value = 0
     uploadStatusText.value = '上传中...'
   }
 
+  currentChunk.value = startChunk
+
   // 分块上传
-  try {
-    while (currentChunk.value < totalChunks.value) {
-      const start = currentChunk.value * CHUNK_SIZE
-      const end = Math.min(start + CHUNK_SIZE, file.size)
-      const chunk = file.slice(start, end)
+  while (currentChunk.value < totalChunks.value) {
+    const start = currentChunk.value * CHUNK_SIZE
+    const end = Math.min(start + CHUNK_SIZE, file.size)
+    const chunk = file.slice(start, end)
 
-      const result = await uploadChunkApi(
-        file.name,
-        currentChunk.value,
-        totalChunks.value,
-        chunk,
-        (percent) => {
-          // 单块内进度
-        }
-      )
+    await uploadChunkApi(
+      file.name,
+      currentChunk.value,
+      totalChunks.value,
+      chunk,
+    )
 
-      currentChunk.value++
-      uploadPercent.value = Math.round((currentChunk.value / totalChunks.value) * 100)
-
-      if (result.status === 'completed') {
-        uploadStatusText.value = '上传完成！'
-        uploadPercent.value = 100
-        ElMessage.success('文件上传成功')
-        loadFiles()
-        setTimeout(() => {
-          uploadDialogVisible.value = false
-        }, 1500)
-        return
-      }
-    }
-  } catch (e: any) {
-    ElMessage.error('上传失败: ' + (e.message || '未知错误'))
-    uploadStatusText.value = '上传失败'
-  } finally {
-    uploading.value = false
+    currentChunk.value++
+    uploadPercent.value = Math.round((currentChunk.value / totalChunks.value) * 100)
   }
+
+  uploadStatusText.value = '上传完成！'
+  uploadPercent.value = 100
 }
 
 // ==================== 文件操作 ====================
@@ -339,5 +367,38 @@ onMounted(() => {
 .md5-pending {
   color: var(--el-text-color-secondary);
   font-size: 12px;
+}
+
+.selected-files {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.selected-file-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+  font-size: 13px;
+}
+
+.selected-file-item:last-child {
+  border-bottom: none;
+}
+
+.selected-file-item .file-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.selected-file-item .file-size {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  flex-shrink: 0;
 }
 </style>

@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"strconv"
 
+	"fastdp-orbit/backend/engine/orchestrator"
+	"fastdp-orbit/backend/models/machine"
 	"fastdp-orbit/backend/models/workflow"
 
 	"github.com/gin-gonic/gin"
@@ -34,7 +36,8 @@ func ListWorkflowTemplates(c *gin.Context) {
 		return
 	}
 
-	templates, err := WorkflowService.ListWorkflowTemplates()
+	packageGroup := c.Query("source")
+	templates, err := WorkflowService.ListWorkflowTemplates(packageGroup)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "message": "系统内部错误"})
 		return
@@ -146,4 +149,94 @@ func DeleteWorkflowTemplate(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"code": 0, "message": "success"})
+}
+
+// PreviewTemplateRequest 模板预览请求
+type PreviewTemplateRequest struct {
+	Content   string `json:"content" binding:"required"`
+	MachineID uint   `json:"machine_id"` // 选择具体机器
+}
+
+// PreviewTemplate 渲染模板预览
+func PreviewTemplate(c *gin.Context) {
+	if WorkflowService == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "message": "服务未初始化"})
+		return
+	}
+
+	var req PreviewTemplateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "message": "参数错误: " + err.Error()})
+		return
+	}
+
+	// 构建模板变量
+	templateVars := buildPreviewVars(req.MachineID)
+
+	// 复用 RenderTemplate 渲染（与 orchestrator 一致）
+	rendered, err := orchestrator.RenderTemplate(req.Content, templateVars)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "message": "渲染失败: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"code": 0, "message": "success", "data": rendered})
+}
+
+// buildPreviewVars 构建预览用的模板变量（选择具体机器）
+func buildPreviewVars(machineID uint) map[string]interface{} {
+	db := WorkflowService.DB()
+
+	// 加载全局变量
+	var globalVarList []workflow.GlobalVariable
+	db.Find(&globalVarList)
+	globalVars := make(map[string]interface{})
+	for _, v := range globalVarList {
+		globalVars[v.Key] = v.Value
+	}
+
+	// 加载所有机器分组（供 Groups 使用）
+	var allGroups []machine.MachineGroup
+	db.Preload("Machines").Find(&allGroups)
+	groupsMap := orchestrator.BuildGroupsMap(allGroups)
+
+	// 构建当前机器变量（默认占位）
+	machineMap := map[string]interface{}{
+		"ip":       "127.0.0.1",
+		"hostname": "preview-host",
+		"os_name":  "preview-os",
+	}
+
+	// 如果指定了机器，使用该机器的真实数据
+	if machineID > 0 {
+		var m machine.Machine
+		if err := db.First(&m, machineID).Error; err == nil {
+			machineMap = orchestrator.MachineToMap(&m)
+		}
+	}
+
+	// Group 变量（默认占位）
+	groupVars := map[string]interface{}{
+		"name": "preview-group",
+	}
+
+	// Server 变量
+	serverVars := map[string]interface{}{
+		"ip":       "127.0.0.1",
+		"port":     "8080",
+		"protocol": "http",
+	}
+	if Orchestrator != nil {
+		serverVars["ip"] = Orchestrator.GetServerIP()
+		serverVars["port"] = Orchestrator.GetServerPort()
+		serverVars["protocol"] = Orchestrator.GetProtocol()
+	}
+
+	return map[string]interface{}{
+		"Machine":        machineMap,
+		"GlobalVariable": globalVars,
+		"Group":          groupVars,
+		"Groups":         groupsMap,
+		"Server":         serverVars,
+	}
 }

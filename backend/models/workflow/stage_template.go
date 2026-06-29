@@ -17,6 +17,7 @@ type StageTemplate struct {
 	MachineGroupID uint           `json:"machine_group_id" gorm:"index"`
 	Tasks          string         `json:"tasks" gorm:"type:text"` // JSON array of StageTask
 	Version        string         `json:"version" gorm:"size:20;not null;default:'init'"`
+	Source         string         `json:"source" gorm:"size:100;index;default:''"` // 来源（模板包名）
 }
 
 // StageTask 存储在 StageTemplate.Tasks JSON 中的任务结构

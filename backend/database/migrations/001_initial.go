@@ -46,6 +46,8 @@ func InitialMigration(db *gorm.DB) error {
 		&workflow.WorkflowTemplate{},
 		// Storage（文件存储）
 		&storage.StorageFile{},
+		// SolutionLibrary（方案库）
+		&workflow.SolutionLibrary{},
 	)
 	if err != nil {
 		return err

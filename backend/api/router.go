@@ -37,6 +37,9 @@ func SetupRouter(cfg *config.ServerConfig, mc *cache.MachineCache, pool *serverg
 	// API v1
 	api := router.Group("/api/v1")
 	{
+		// Dashboard
+		api.GET("/dashboard/stats", views.GetDashboardStats)
+
 		// Machine management
 		machines := api.Group("/machines")
 		{
@@ -76,16 +79,6 @@ func SetupRouter(cfg *config.ServerConfig, mc *cache.MachineCache, pool *serverg
 			workflows.POST("/:id/executions/:eid/stages/:sid/retry", views.RetryStage)
 		}
 
-		// Templates
-		templates := api.Group("/templates")
-		{
-			templates.GET("", views.ListTemplates)
-			templates.POST("", views.CreateTemplate)
-			templates.GET("/:id", views.GetTemplate)
-			templates.PUT("/:id", views.UpdateTemplate)
-			templates.DELETE("/:id", views.DeleteTemplate)
-		}
-
 		// Stage Templates（阶段模板管理）
 		stageTemplates := api.Group("/stage-templates")
 		{
@@ -98,6 +91,12 @@ func SetupRouter(cfg *config.ServerConfig, mc *cache.MachineCache, pool *serverg
 			// 版本管理
 			stageTemplates.GET("/:id/versions", views.ListStageTemplateVersions)
 			stageTemplates.POST("/:id/rollback", views.RollbackStageTemplate)
+
+			// 单阶段执行
+			stageTemplates.POST("/:id/execute", views.ExecuteSingleStage)
+
+			// 执行历史
+			stageTemplates.GET("/:id/executions", views.ListStageExecutions)
 		}
 
 		// Global Variables（全局变量管理）
@@ -125,9 +124,21 @@ func SetupRouter(cfg *config.ServerConfig, mc *cache.MachineCache, pool *serverg
 		{
 			workflowTemplates.GET("", views.ListWorkflowTemplates)
 			workflowTemplates.POST("", views.CreateWorkflowTemplate)
+			workflowTemplates.POST("/preview", views.PreviewTemplate)
 			workflowTemplates.GET("/:id", views.GetWorkflowTemplate)
 			workflowTemplates.PUT("/:id", views.UpdateWorkflowTemplate)
 			workflowTemplates.DELETE("/:id", views.DeleteWorkflowTemplate)
+		}
+
+		// Solution Library（方案库管理）
+		solutionLibraries := api.Group("/solution-libraries")
+		{
+			solutionLibraries.GET("", views.ListSolutionLibrarys)
+			solutionLibraries.POST("", views.CreateSolutionLibrary)
+			solutionLibraries.GET("/:id", views.GetSolutionLibrary)
+			solutionLibraries.DELETE("/:id", views.DeleteSolutionLibrary)
+			solutionLibraries.GET("/:id/export", views.ExportSolutionLibrary)
+			solutionLibraries.POST("/import", views.ImportSolutionLibrary)
 		}
 
 		// Storage（文件存储管理）
@@ -139,40 +150,6 @@ func SetupRouter(cfg *config.ServerConfig, mc *cache.MachineCache, pool *serverg
 			storage.POST("/upload", views.UploadChunk)
 			storage.GET("/resume-info", views.GetResumeInfo)
 		}
-
-		// Cluster management
-		clusters := api.Group("/clusters")
-		{
-			clusters.GET("", views.ListClusters)
-			clusters.POST("", views.CreateCluster)
-			clusters.GET("/:id", views.GetCluster)
-			clusters.POST("/:id/init", views.InitCluster)
-			clusters.POST("/:id/join", views.JoinCluster)
-			clusters.GET("/:id/nodes", views.ListClusterNodes)
-		}
-
-		// Monitoring
-		monitor := api.Group("/monitor")
-		{
-			monitor.GET("/overview", views.GetOverview)
-			monitor.GET("/nodes", views.ListNodes)
-			monitor.GET("/nodes/:id", views.GetNodeMetrics)
-			monitor.GET("/pods", views.ListPods)
-			monitor.GET("/events", views.ListEvents)
-		}
-
-		// GPU management
-		gpu := api.Group("/gpu")
-		{
-			gpu.GET("/nodes", views.ListGPUNodes)
-			gpu.GET("/tasks", views.ListGPUTasks)
-			gpu.POST("/tasks", views.CreateGPUTask)
-			gpu.GET("/models", views.ListModels)
-			gpu.POST("/models/deploy", views.DeployModel)
-		}
-
-		// WebSocket for real-time updates
-		api.GET("/ws", views.HandleWebSocket)
 
 		// SSE for execution real-time updates
 		api.GET("/executions/:id/stream", views.HandleSSE)
@@ -187,7 +164,7 @@ func SetupRouter(cfg *config.ServerConfig, mc *cache.MachineCache, pool *serverg
 
 	// Vue 静态资源
 	router.Static("/assets", "./dist/assets")
-	router.StaticFile("/favicon.ico", "./dist/favicon.ico")
+	router.StaticFile("/vite.svg", "./dist/vite.svg")
 
 	// 文件下载路由（独立于 /api/v1，支持 wget -c 续传）
 	router.GET("/download/*path", views.DownloadFile)

@@ -119,15 +119,13 @@ const isFullscreen = ref(false)
 const menuItems = [
   { path: '/dashboard', title: '仪表盘', icon: 'mdi:view-dashboard-outline' },
   { path: '/node', title: '节点管理', icon: 'mdi:server-network-outline' },
-  { path: '/model-service', title: '大模型服务', icon: 'mdi:robot-outline' },
-  { path: '/storage', title: '存储管理', icon: 'mdi:harddisk-variant-outline' },
-  { path: '/cluster', title: '集群部署', icon: 'mdi:cluster-outline' },
+  { path: '/storage', title: '存储管理', icon: 'mdi:database' },
   { path: '/workflow', title: '工作流', icon: 'mdi:play-circle-outline' },
   { path: '/stages', title: '阶段管理', icon: 'mdi:view-column-outline' },
   { path: '/global-variables', title: '全局变量', icon: 'mdi:code-json' },
   { path: '/hook-templates', title: '钩子管理', icon: 'mdi:hook' },
-  { path: '/workflow-templates', title: '模板文件', icon: 'mdi:file-document-outline' },
-  { path: '/testing', title: '自动化测试', icon: 'mdi:test-tube-outline' },
+  { path: '/workflow-templates', title: '配置模板', icon: 'mdi:file-document-outline' },
+  { path: '/solution-library', title: '方案库', icon: 'mdi:package-variant-closed' },
   { path: '/settings', title: '系统设置', icon: 'mdi:cog-outline' },
 ]
 
@@ -226,6 +224,19 @@ function handleUserCommand(command: string) {
   border-radius: 8px;
   color: rgba(255, 255, 255, 0.6);
   transition: all 0.2s;
+}
+
+/* 折叠状态下图标放大 */
+.sidebar-menu.el-menu--collapse .el-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  margin: 4px 6px;
+}
+
+.sidebar-menu.el-menu--collapse .el-menu-item .iconify {
+  font-size: 24px !important;
 }
 
 .sidebar-menu .el-menu-item:hover {

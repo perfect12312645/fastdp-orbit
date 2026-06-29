@@ -92,6 +92,23 @@
           </div>
         </template>
 
+        <template v-if="filteredServerVars.length > 0">
+          <div class="var-picker-group">
+            <div class="var-picker-group-title">
+              <Icon icon="mdi:server" :size="14" /> 平台配置
+            </div>
+            <div
+              v-for="v in filteredServerVars"
+              :key="'sv_' + v.key"
+              class="var-picker-item"
+              @click="selectVariable(serverVarExpr(v.key))"
+            >
+              <span class="var-picker-item-name">{{ v.key }}</span>
+              <span class="var-picker-item-desc">{{ v.label }}</span>
+            </div>
+          </div>
+        </template>
+
         <template v-if="filteredGroupsVars.length > 0">
           <div class="var-picker-group">
             <div class="var-picker-group-title">
@@ -191,6 +208,12 @@ const groupVars: GroupVar[] = [
   { key: 'name', label: '分组名称' },
 ]
 
+const serverVars: GroupVar[] = [
+  { key: 'ip', label: 'Server IP' },
+  { key: 'port', label: 'Server 端口' },
+  { key: 'protocol', label: '协议(http/https)' },
+]
+
 const filteredGlobalVars = computed(() => {
   const kw = searchText.value.toLowerCase()
   return globalVars.value.filter(
@@ -208,6 +231,13 @@ const filteredMachineVars = computed(() => {
 const filteredGroupVars = computed(() => {
   const kw = searchText.value.toLowerCase()
   return groupVars.filter(
+    (v) => v.key.toLowerCase().includes(kw) || v.label.toLowerCase().includes(kw)
+  )
+})
+
+const filteredServerVars = computed(() => {
+  const kw = searchText.value.toLowerCase()
+  return serverVars.filter(
     (v) => v.key.toLowerCase().includes(kw) || v.label.toLowerCase().includes(kw)
   )
 })
@@ -231,6 +261,7 @@ const noResults = computed(() => {
     filteredGlobalVars.value.length === 0 &&
     filteredMachineVars.value.length === 0 &&
     filteredGroupVars.value.length === 0 &&
+    filteredServerVars.value.length === 0 &&
     filteredGroupsVars.value.length === 0 &&
     filteredRegisteredVars.value.length === 0
   )
@@ -261,6 +292,10 @@ function networkLoopExpr() {
   return `{{ range $netIdx, $net := .Machine.networks }}
 网卡{{$netIdx}}: {{$net.ip}} {{$net.mac}}
 {{ end }}`
+}
+
+function serverVarExpr(key: string) {
+  return `{{ .Server.${key} }}`
 }
 
 function selectVariable(expression: string) {

@@ -6,6 +6,7 @@ export interface WorkflowTemplate {
   description: string
   content: string
   variables: string
+  source: string
   created_at: string
   updated_at: string
 }
@@ -33,4 +34,9 @@ export function updateWorkflowTemplateApi(id: number, data: Partial<WorkflowTemp
 /** 删除工作流模板文件 */
 export function deleteWorkflowTemplateApi(id: number): Promise<void> {
   return request.delete(`/workflow-templates/${id}`).then((res) => res.data)
+}
+
+/** 预览模板渲染结果 */
+export function previewWorkflowTemplateApi(content: string, machineId?: number): Promise<string> {
+  return request.post('/workflow-templates/preview', { content, machine_id: machineId || 0 }).then((res) => res.data.data)
 }

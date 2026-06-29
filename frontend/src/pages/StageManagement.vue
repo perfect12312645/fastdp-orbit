@@ -22,6 +22,9 @@
                 <Icon icon="mdi:magnify" :size="16" />
               </template>
             </el-input>
+            <el-select v-model="selectedSource" placeholder="按来源筛选" clearable style="width: 160px;">
+              <el-option v-for="g in stageSources" :key="g" :label="g || '(默认)'" :value="g" />
+            </el-select>
           </div>
           <div class="table-toolbar-right">
             <span class="total-text">共 {{ filteredStages.length }} 个阶段</span>
@@ -41,8 +44,14 @@
                 <el-tag size="small" type="info" effect="plain" class="version-tag">{{ stage.version }}</el-tag>
               </div>
               <div class="stage-card-actions">
+                <el-button type="success" link size="small" @click="showExecuteDialog(stage)">
+                  <Icon icon="mdi:play" :size="14" /> 执行
+                </el-button>
+                <el-button type="info" link size="small" @click="showExecutionHistory(stage)">
+                  <Icon icon="mdi:history" :size="14" /> 执行记录
+                </el-button>
                 <el-button type="primary" link size="small" @click="showVersionHistory(stage)">
-                  <Icon icon="mdi:history" :size="14" /> 版本
+                  <Icon icon="mdi:source-commit" :size="14" /> 版本
                 </el-button>
                 <el-button type="primary" link size="small" @click="editStage(stage)">
                   <Icon icon="mdi:pencil" :size="14" /> 编辑
@@ -106,10 +115,10 @@
         </div>
 
         <div class="fullscreen-content">
-          <el-form :model="formData" label-width="90px" ref="formRef" :rules="formRules">
-            <div class="form-section">
+          <el-form :model="formData" label-width="80px" ref="formRef" :rules="formRules">
+            <div class="form-section form-section-compact">
               <h3 class="form-section-title">基本信息</h3>
-              <el-row :gutter="24">
+              <el-row :gutter="16">
                 <el-col :span="12">
                   <el-form-item label="阶段名称" prop="name">
                     <el-input v-model="formData.name" placeholder="如：安装 Docker" />
@@ -144,8 +153,8 @@
                   </el-form-item>
                 </el-col>
               </el-row>
-              <el-form-item label="描述">
-                <el-input v-model="formData.description" type="textarea" :rows="2" placeholder="可选" />
+              <el-form-item label="描述" class="form-item-compact">
+                <el-input v-model="formData.description" type="textarea" :rows="1" placeholder="可选" />
               </el-form-item>
             </div>
 
@@ -205,7 +214,7 @@
                     </div>
                   </div>
                   <div class="task-card-body">
-                    <el-row :gutter="16">
+                    <el-row :gutter="12">
                       <el-col :span="8">
                         <el-form-item label="模块类型" class="task-field">
                            <el-select v-model="task.module" placeholder="选择模块" style="width: 100%" @change="resetTaskParams(task)">
@@ -356,12 +365,22 @@
                                 <span style="color: #909399; margin-left: 8px; font-size: 12px;">{{ tpl.description }}</span>
                               </el-option>
                             </el-select>
-                            <!-- 其他参数：普通输入框 -->
+                            <!-- 其他参数：普通输入框 / 多行输入框 -->
                             <el-input
-                              v-else
+                              v-else-if="!isMultilineParam(task.module, key)"
                               v-model="task.params[key]"
                               :placeholder="getParamPlaceholder(task.module, key)"
                               class="params-kv-value"
+                              @focus="trackFocus"
+                            />
+                            <el-input
+                              v-else
+                              v-model="task.params[key]"
+                              type="textarea"
+                              :rows="4"
+                              :placeholder="getParamPlaceholder(task.module, key)"
+                              class="params-kv-value"
+                              @focus="trackFocus"
                             />
                             <div class="params-kv-actions">
                               <el-dropdown v-if="task.loop && task.loop.length > 0" trigger="click" @command="(cmd: string) => { task.params[key] += cmd }">
@@ -384,7 +403,7 @@
                                 button-type="primary"
                                 :registered-vars="getRegisteredVarsBefore(formData.tasks, ti)"
                                 :machine-groups="machineGroupsForPicker"
-                                @select="(expr: string) => { task.params[key] += expr }"
+                                @select="(expr: string) => { task.params[key] = insertAtCursor(task.params[key], expr) }"
                               />
                             </div>
                           </div>
@@ -402,7 +421,7 @@
                             button-type="primary"
                             :registered-vars="getRegisteredVarsBefore(formData.tasks, ti)"
                             :machine-groups="machineGroupsForPicker"
-                            @select="(expr: string) => { getWhenClause(task, ti).left = expr; updateWhenFromClause(task, ti) }"
+                            @select="(expr: string) => { getWhenClause(task, ti).left = insertAtCursor(getWhenClause(task, ti).left, expr); updateWhenFromClause(task, ti) }"
                           />
                           <el-input
                             :model-value="getWhenClause(task, ti).left"
@@ -410,6 +429,7 @@
                             placeholder="选择或输入变量"
                             class="when-left"
                             size="small"
+                            @focus="trackFocus"
                           />
                           <el-select
                             :model-value="getWhenClause(task, ti).operator"
@@ -430,12 +450,13 @@
                             placeholder="值"
                             class="when-right"
                             size="small"
+                            @focus="trackFocus"
                           />
                           <VariablePicker
                             button-type="primary"
                             :registered-vars="getRegisteredVarsBefore(formData.tasks, ti)"
                             :machine-groups="machineGroupsForPicker"
-                            @select="(expr: string) => { getWhenClause(task, ti).right += expr; updateWhenFromClause(task, ti) }"
+                            @select="(expr: string) => { getWhenClause(task, ti).right = insertAtCursor(getWhenClause(task, ti).right, expr); updateWhenFromClause(task, ti) }"
                           />
                         </div>
                       </div>
@@ -551,13 +572,16 @@
 
               <!-- YAML 模式 -->
               <div v-else class="yaml-editor">
-                <el-input
-                  v-model="yamlContent"
-                  type="textarea"
-                  :rows="20"
-                  placeholder="在此编辑 YAML 格式的完整配置（基本信息 + 任务列表）"
-                  class="yaml-textarea"
-                />
+                <div class="yaml-editor-wrapper">
+                  <codemirror
+                    v-model="yamlContent"
+                    :style="{ height: '100%', width: '100%' }"
+                    :extensions="codemirrorExtensions"
+                    :tab-size="2"
+                    :indent-with-tab="true"
+                    placeholder="在此编辑 YAML 格式的完整配置（基本信息 + 任务列表）"
+                  />
+                </div>
                 <div class="yaml-actions">
                   <el-button size="small" @click="formatYaml">
                     <Icon icon="mdi:format-align-left" :size="14" /> 格式化
@@ -705,6 +729,122 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- 执行阶段对话框 -->
+    <el-dialog v-model="executeDialogVisible" title="执行阶段" width="480px" destroy-on-close>
+      <div v-if="executingStage">
+        <p style="margin-bottom: 16px; font-size: 14px; color: var(--el-text-color-secondary);">
+          即将执行阶段：<strong>{{ executingStage.name }}</strong>
+          <el-tag size="small" type="info" effect="plain" style="margin-left: 8px;">
+            {{ getMachineGroupName(executingStage.machine_group_id) || '未指定分组' }}
+          </el-tag>
+        </p>
+        <el-collapse v-model="overrideCollapse">
+          <el-collapse-item title="覆盖机器分组（可选）" name="override">
+            <el-select
+              v-model="executeGroupId"
+              placeholder="选择其他分组"
+              clearable
+              style="width: 100%"
+            >
+              <el-option
+                v-for="g in machineGroups"
+                :key="g.id"
+                :label="`${g.name} (${g.machines?.length || 0} 台)`"
+                :value="g.id"
+              />
+            </el-select>
+            <div style="font-size: 12px; color: var(--el-text-color-secondary); margin-top: 4px;">
+              不选择则使用上方显示的默认分组
+            </div>
+          </el-collapse-item>
+        </el-collapse>
+      </div>
+      <template #footer>
+        <el-button @click="executeDialogVisible = false">取消</el-button>
+        <el-button type="success" @click="handleExecute" :loading="executing">
+          <Icon icon="mdi:play" :size="16" /> 执行
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 执行日志查看器 -->
+    <ExecutionLogViewer
+      ref="executionLogViewer"
+      :execution-id="currentExecutionId"
+      :stage-name="executingStage?.name || ''"
+      :machine-group-name="getMachineGroupName(executingStage?.machine_group_id || 0)"
+    />
+
+    <!-- 执行历史对话框 -->
+    <el-dialog v-model="executionHistoryVisible" title="执行记录" width="700px" destroy-on-close>
+      <div v-if="executionHistoryStage">
+        <p style="margin-bottom: 16px; color: var(--el-text-color-secondary); font-size: 14px;">
+          阶段：<strong>{{ executionHistoryStage.name }}</strong>
+        </p>
+        <el-table :data="executionHistory" v-loading="executionHistoryLoading" stripe>
+          <el-table-column label="执行ID" prop="id" width="80" />
+          <el-table-column label="状态" width="100">
+            <template #default="{ row }">
+              <el-tag :type="getStatusType(row.status)" size="small">
+                {{ getStatusLabel(row.status) }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="触发方式" width="100" prop="trigger" />
+          <el-table-column label="开始时间" width="170">
+            <template #default="{ row }">
+              {{ formatDateTime(row.started_at) }}
+            </template>
+          </el-table-column>
+          <el-table-column label="结束时间" width="170">
+            <template #default="{ row }">
+              {{ row.finished_at ? formatDateTime(row.finished_at) : '-' }}
+            </template>
+          </el-table-column>
+          <el-table-column label="错误" min-width="150" show-overflow-tooltip>
+            <template #default="{ row }">
+              <span v-if="row.error" style="color: var(--el-color-danger);">{{ row.error }}</span>
+              <span v-else style="color: var(--el-text-color-secondary);">-</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="160" fixed="right">
+            <template #default="{ row }">
+              <el-button type="primary" link size="small" @click="viewExecutionLog(row.id)">
+                <Icon icon="mdi:console" :size="14" /> 日志
+              </el-button>
+              <el-button
+                v-if="row.status === 'running' || row.status === 'paused'"
+                type="danger"
+                link
+                size="small"
+                @click="cancelExecution(row.id)"
+              >
+                <Icon icon="mdi:stop" :size="14" /> 终止
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <div v-if="executionHistory.length === 0 && !executionHistoryLoading" style="text-align: center; padding: 40px; color: var(--el-text-color-secondary);">
+          暂无执行记录
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="executionHistoryVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 重新打开日志按钮 -->
+    <transition name="el-fade-in">
+      <div
+        v-if="currentExecutionId && !logViewerVisible"
+        class="reopen-log-btn"
+        @click="reopenLogViewer"
+      >
+        <Icon icon="mdi:console" :size="20" />
+        <span>查看执行日志</span>
+      </div>
+    </transition>
   </div>
 </template>
 
@@ -713,7 +853,11 @@ import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { Icon } from '@iconify/vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import * as yaml from 'js-yaml'
+import { Codemirror } from 'vue-codemirror'
+import { oneDark } from '@codemirror/theme-one-dark'
+import { EditorView } from '@codemirror/view'
 import { getMachineGroupsApi, type MachineGroup } from '@/api/machineGroup'
+import ExecutionLogViewer from '@/components/ExecutionLogViewer.vue'
 import {
   getStageTemplatesApi,
   createStageTemplateApi,
@@ -721,6 +865,7 @@ import {
   deleteStageTemplateApi,
   listStageTemplateVersionsApi,
   rollbackStageTemplateApi,
+  executeStageTemplateApi,
   type StageTemplate,
   type StageTemplateVersion,
 } from '@/api/stageTemplate'
@@ -734,6 +879,9 @@ import {
 } from '@/api/workflowTemplate'
 import { HandledError } from '@/utils/request'
 import VariablePicker from '@/components/VariablePicker.vue'
+
+// CodeMirror 配置
+const codemirrorExtensions = [oneDark, EditorView.lineWrapping]
 
 interface StageTask {
   ref: number
@@ -758,21 +906,33 @@ interface StageTask {
 
 // 每种模块支持的参数 key 和占位说明
 const MODULE_PARAMS: Record<string, Record<string, string>> = {
-  shell: { command: '执行的命令' },
-  script: { script: '脚本内容', script_file: '脚本文件路径（可选）' },
-  systemd: { name: '服务名称', action: 'start/stop/restart/enable/disable' },
-  package: { name: '包名', state: 'present/absent/latest' },
-  file: { src: '源文件路径', dest: '目标路径' },
+  shell: { command: '执行的命令 [必填]' },
+  script: { script: '脚本内容（与script_file二选一）', script_file: '脚本文件路径（与script二选一）' },
+  systemd: { name: '服务名称 [必填，reload操作可不填]', action: '操作类型 [必填]: start/stop/restart/reload/status/enable/disable' },
+  package: { action: '操作类型 [必填]: install/remove/update/check/localinstall', name: '包名（多包逗号分隔，localinstall时填文件路径）[必填]' },
+  file: { path: '目标路径（绝对路径）[必填]', action: '操作类型 [必填]: create/delete/touch/symlink', type: '文件类型（create/symlink时必填）: file/directory', src: '符号链接源路径（symlink时必填）', mode: '权限模式（可选），如 0644', owner: '所有者UID（可选）', group: '所属组GID（可选）', recurse: '递归创建目录（可选）: true/false', force: '强制删除非空目录（可选）: true/false', backup: '操作前备份（可选）: true/false' },
   file_pull: { url: '文件URL（支持http/https）[必填]', dest: '目标路径（绝对路径，以/结尾则自动提取文件名）[必填]', md5: '文件MD5（可选，用于校验）' },
-  template: { src: '选择模板文件（与content二选一）', content: '内联模板内容（与src二选一，content优先）', dest: '目标路径（绝对路径）[必填]', append: '追加模式/覆盖模式（true/false）默认false' },
-  repo: { name: '仓库名', state: 'present/absent' },
-  blockinfile: { path: '文件路径', block: '插入的内容', marker: '标记注释', insertafter: '插入位置' },
-  lineinfile: { path: '文件路径 [必填]', regexp: '匹配正则 [必填]', line: '目标行 [必填]', action: 'insert/replace/delete [必填]', backrefs: '反向引用', insertbefore: '插入位置' },
-  modprobe: { name: '模块名', state: 'present/absent' },
-  cfssl: { action: '操作类型 [必填]: generate_ca/generate_cert' },
-  image: { action: '操作类型 [必填]: load/push/remove/pull', image: '镜像名称 [必填]' },
-  unarchive: { src: '源文件路径 [必填]', dest: '目标路径 [必填]', strip_components: '去除路径层级' },
-  copy: { src: 'Server端源文件路径（绝对路径）[必填]', dest: 'Agent端目标路径（绝对路径）[必填]', type: '类型[file/dir]', recursive: '递归', mode: '文件权限' },
+  template: { src: '选择模板文件（与content二选一，引擎层渲染为content）', content: 'Go template模板内容（与src二选一，直接填写时使用）', dest: '目标路径（绝对路径）[必填]', append: '追加模式（可选）: true/false，默认false覆盖' },
+  repo: { action: '操作类型 [必填]: add/remove/test/backup/restore/makecache', name: '仓库名称（add/remove时必填）', url: '仓库URL（add/test时必填）' },
+  blockinfile: { action: '操作类型 [必填]: ensure/delete', path: '目标文件路径 [必填]', content: '文本块内容（ensure时必填，支持换行）', backup: '操作前备份（可选）: true/false' },
+  lineinfile: { path: '目标文件路径（绝对路径）[必填]', regexp: '匹配行的正则表达式 [必填]', line: '目标行内容（insert/replace时必填）', action: '操作类型 [必填]: insert/replace/delete', backrefs: '启用正则反向引用（仅replace时有效）: true/false', insertbefore: '插入到匹配行前（可选）: true/false，默认false插入到匹配行后' },
+  modprobe: { module: '内核模块名（与loop二选一）', loop: '模块列表（逗号分隔，与module二选一）', action: '操作类型（可选）: load/remove，默认load', options: '模块加载选项（可选）' },
+  cfssl: { action: '操作类型 [必填]: generate_ca/generate_cert', csr_path: 'CSR配置文件路径 [必填]', output_dir: '证书输出目录 [必填]', basename: '输出文件名前缀 [必填]', ca_cert: 'CA证书路径（generate_cert时必填）', ca_key: 'CA私钥路径（generate_cert时必填）', config_file: 'cfssl配置文件（generate_cert时必填）', profile: '配置profile名称（generate_cert时必填）' },
+  image: { action: '操作类型 [必填]: load/push/remove/pull', tag: '镜像标签（如nginx:latest）[必填]', path: '镜像文件路径（load时必填，绝对路径）' },
+  unarchive: { src: '压缩文件路径（绝对路径）[必填]', dest: '目标目录（绝对路径）[必填]', strip_components: '去除路径层级数（可选），如1' },
+  copy: { src: 'Server端源文件路径（绝对路径）[必填]', dest: 'Agent端目标路径（绝对路径）[必填]', type: '类型（可选）: file/dir', recursive: '递归复制（可选）: true/false', mode: '文件权限（可选），如 0644' },
+}
+
+// 需要多行输入的参数（textarea）
+const MULTILINE_PARAMS: Record<string, string[]> = {
+  blockinfile: ['content'],
+  script: ['script'],
+  file: ['command'],
+  template: ['content'],
+}
+
+function isMultilineParam(module: string, key: string): boolean {
+  return MULTILINE_PARAMS[module]?.includes(key) ?? false
 }
 
 function getParamPlaceholder(module: string, key: string): string {
@@ -805,8 +965,39 @@ const machineGroupsForPicker = computed(() => {
   }))
 })
 
+// 跟踪最后聚焦的 input 元素（用于在光标位置插入变量）
+const lastFocusedInput = ref<HTMLInputElement | HTMLTextAreaElement | null>(null)
+
+function trackFocus(e: FocusEvent) {
+  const el = e.target as HTMLInputElement | HTMLTextAreaElement
+  if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
+    lastFocusedInput.value = el
+  }
+}
+
+// 在 el-input 光标位置插入文本
+function insertAtCursor(value: string, insertText: string): string {
+  const el = lastFocusedInput.value
+  if (el && el.selectionStart !== null && el.selectionStart !== undefined) {
+    const start = el.selectionStart
+    const end = el.selectionEnd ?? start
+    const before = value.slice(0, start)
+    const after = value.slice(end)
+    const newValue = before + insertText + after
+    // 恢复光标位置
+    nextTick(() => {
+      el.focus()
+      el.selectionStart = el.selectionEnd = start + insertText.length
+    })
+    return newValue
+  }
+  // 降级：追加到末尾
+  return value + insertText
+}
+
 const loading = ref(false)
 const searchText = ref('')
+const selectedSource = ref('')
 const stages = ref<StageTemplate[]>([])
 const machineGroups = ref<MachineGroup[]>([])
 const machineGroupLoading = ref(false)
@@ -845,6 +1036,73 @@ const saveFormRef = ref()
 const submitting = ref(false)
 const formRef = ref()
 
+// 执行对话框
+const executeDialogVisible = ref(false)
+const executingStage = ref<StageTemplate | null>(null)
+const executeGroupId = ref(0)
+const executing = ref(false)
+const overrideCollapse = ref<string[]>([])
+const executionLogViewer = ref<InstanceType<typeof ExecutionLogViewer> | null>(null)
+const currentExecutionId = ref(0)
+const logViewerVisible = ref(false)
+
+// 执行历史
+const executionHistoryVisible = ref(false)
+const executionHistoryStage = ref<StageTemplate | null>(null)
+const executionHistory = ref<any[]>([])
+const executionHistoryLoading = ref(false)
+
+function reopenLogViewer() {
+  if (executionLogViewer.value && currentExecutionId.value) {
+    executionLogViewer.value.open(currentExecutionId.value)
+    logViewerVisible.value = true
+  }
+}
+
+// 执行历史
+async function showExecutionHistory(stage: StageTemplate) {
+  executionHistoryStage.value = stage
+  executionHistoryVisible.value = true
+  executionHistoryLoading.value = true
+  try {
+    // 查询该阶段的执行记录（通过 workflow_executions 表中 workflow_id=0 的记录）
+    const { getExecutionHistoryApi } = await import('@/api/stageTemplate')
+    executionHistory.value = await getExecutionHistoryApi(stage.id)
+  } catch {
+    executionHistory.value = []
+  } finally {
+    executionHistoryLoading.value = false
+  }
+}
+
+function viewExecutionLog(executionId: number) {
+  executionHistoryVisible.value = false
+  currentExecutionId.value = executionId
+  if (executionLogViewer.value) {
+    executionLogViewer.value.open(executionId)
+    logViewerVisible.value = true
+  }
+}
+
+async function cancelExecution(executionId: number) {
+  try {
+    await ElMessageBox.confirm('确认终止该执行？', '终止确认', {
+      confirmButtonText: '终止',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+    const { cancelExecutionApi } = await import('@/api/workflow')
+    await cancelExecutionApi(0, executionId)
+    ElMessage.success('已发送终止请求')
+    // 刷新执行记录
+    if (executionHistoryStage.value) {
+      showExecutionHistory(executionHistoryStage.value)
+    }
+  } catch (e: any) {
+    if (e !== 'cancel') ElMessage.error(e?.message || '终止失败')
+  }
+}
+
 // 版本历史
 const versionStage = ref<StageTemplate | null>(null)
 const versionLoading = ref(false)
@@ -858,6 +1116,42 @@ const WHEN_OPERATORS = [
   { label: '等于', value: '==' },
   { label: '不等于', value: '!=' },
 ]
+
+// 状态相关函数
+function getStatusType(status: string) {
+  const map: Record<string, string> = {
+    running: 'warning',
+    success: 'success',
+    failed: 'danger',
+    cancelled: 'info',
+    pending: 'info',
+  }
+  return (map[status] || 'info') as any
+}
+
+function getStatusLabel(status: string) {
+  const map: Record<string, string> = {
+    running: '执行中',
+    success: '成功',
+    failed: '失败',
+    cancelled: '已终止',
+    pending: '等待中',
+  }
+  return map[status] || status
+}
+
+function formatDateTime(dateStr: string) {
+  if (!dateStr) return '-'
+  const d = new Date(dateStr)
+  return d.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
+}
 
 interface WhenClause {
   left: string
@@ -933,11 +1227,22 @@ function addLoopRow(task: StageTask) {
 }
 
 const filteredStages = computed(() => {
-  if (!searchText.value) return stages.value
-  const kw = searchText.value.toLowerCase()
-  return stages.value.filter(
-    (s) => s.name.toLowerCase().includes(kw) || (s.description || '').toLowerCase().includes(kw)
-  )
+  let result = stages.value
+  if (selectedSource.value) {
+    result = result.filter(s => s.source === selectedSource.value)
+  }
+  if (searchText.value) {
+    const kw = searchText.value.toLowerCase()
+    result = result.filter(
+      (s) => s.name.toLowerCase().includes(kw) || (s.description || '').toLowerCase().includes(kw)
+    )
+  }
+  return result
+})
+
+const stageSources = computed(() => {
+  const groups = new Set(stages.value.map(s => s.source).filter(Boolean))
+  return Array.from(groups).sort()
 })
 
 function normalizeTasks(rawTasks: any[]): StageTask[] {
@@ -1187,9 +1492,10 @@ function validateTasks(tasks: StageTask[]): boolean {
 
 function formToYaml() {
   try {
+    const groupName = machineGroups.value.find(g => g.id === formData.value.machine_group_id)?.name || ''
     const obj: Record<string, any> = {
       name: formData.value.name,
-      machine_group_id: formData.value.machine_group_id,
+      machine_group: groupName,
     }
     if (formData.value.description) obj.description = formData.value.description
     obj.tasks = formData.value.tasks.map(t => {
@@ -1225,7 +1531,17 @@ function yamlToForm() {
     }
     if (parsed.name !== undefined) formData.value.name = String(parsed.name)
     if (parsed.description !== undefined) formData.value.description = String(parsed.description)
-    if (parsed.machine_group_id !== undefined) formData.value.machine_group_id = Number(parsed.machine_group_id)
+    // 支持 machine_group (name) 和 machine_group_id (兼容旧格式)
+    if (parsed.machine_group !== undefined) {
+      const group = machineGroups.value.find(g => g.name === parsed.machine_group)
+      if (group) {
+        formData.value.machine_group_id = group.id
+      } else {
+        ElMessage.warning(`机器分组「${parsed.machine_group}」不存在，请先创建`)
+      }
+    } else if (parsed.machine_group_id !== undefined) {
+      formData.value.machine_group_id = Number(parsed.machine_group_id)
+    }
     if (Array.isArray(parsed.tasks)) {
       formData.value.tasks = normalizeTasks(parsed.tasks)
     }
@@ -1353,6 +1669,34 @@ async function confirmSave() {
   }
 }
 
+// ==================== 执行 ====================
+
+function showExecuteDialog(stage: StageTemplate) {
+  executingStage.value = stage
+  executeGroupId.value = 0
+  executeDialogVisible.value = true
+}
+
+async function handleExecute() {
+  if (!executingStage.value) return
+  executing.value = true
+  try {
+    const result = await executeStageTemplateApi(executingStage.value.id, executeGroupId.value || undefined)
+    ElMessage.success(`执行已启动，执行ID: ${result.execution_id}`)
+    currentExecutionId.value = result.execution_id
+    executeDialogVisible.value = false
+
+    // 打开执行日志查看器
+    if (executionLogViewer.value) {
+      executionLogViewer.value.open(result.execution_id)
+    }
+  } catch (e: any) {
+    if (!(e instanceof HandledError)) ElMessage.error(e?.message || '执行失败')
+  } finally {
+    executing.value = false
+  }
+}
+
 // ==================== 删除 ====================
 
 async function deleteStage(stage: StageTemplate) {
@@ -1407,7 +1751,10 @@ async function handleUpdateToVersion(version: StageTemplateVersion) {
   }
 }
 
-onMounted(loadData)
+onMounted(() => {
+  loadData()
+  loadMachineGroups()
+})
 </script>
 
 <style scoped>
@@ -1441,9 +1788,9 @@ onMounted(loadData)
 }
 
 .stage-cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-  gap: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .stage-card {
@@ -1592,25 +1939,33 @@ onMounted(loadData)
 .fullscreen-content {
   flex: 1;
   overflow-y: auto;
-  padding: 24px;
+  padding: 16px 24px;
 }
 
 .form-section {
-  margin-bottom: 24px;
+  margin-bottom: 16px;
+}
+
+.form-section-compact .el-form-item {
+  margin-bottom: 12px;
+}
+
+.form-section-compact .form-item-compact {
+  margin-bottom: 8px;
 }
 
 .form-section-title {
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--text-color-primary);
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .form-section-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .form-section-title-row {
@@ -1627,7 +1982,7 @@ onMounted(loadData)
   display: flex;
   flex-direction: column;
   gap: 12px;
-  max-height: calc(100vh - 400px);
+  max-height: calc(100vh - 300px);
   overflow-y: auto;
   padding-bottom: 16px;
 }
@@ -1697,6 +2052,12 @@ onMounted(loadData)
   font-size: 12px;
   color: var(--text-color-secondary);
   font-weight: 500;
+  line-height: 28px;
+  padding-right: 8px;
+}
+
+.task-field :deep(.el-form-item) {
+  margin-bottom: 0;
 }
 
 .empty-tip {
@@ -1754,10 +2115,15 @@ onMounted(loadData)
   gap: 12px;
 }
 
-.yaml-textarea :deep(textarea) {
-  font-family: monospace;
-  font-size: 13px;
-  line-height: 1.6;
+.yaml-editor-wrapper {
+  height: calc(100vh - 300px);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.yaml-editor-wrapper :deep(.cm-editor) {
+  height: 100%;
 }
 
 .yaml-actions {
@@ -2140,5 +2506,27 @@ onMounted(loadData)
 
 .loop-var-btn {
   margin-left: 4px;
+}
+
+.reopen-log-btn {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  background: var(--el-color-primary);
+  color: #fff;
+  border-radius: 8px;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  transition: all 0.2s;
+  z-index: 100;
+}
+
+.reopen-log-btn:hover {
+  background: var(--el-color-primary-dark-2);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
 }
 </style>

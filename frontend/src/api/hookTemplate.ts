@@ -10,6 +10,7 @@ export interface HookTemplate {
   ignore_errors: boolean
   retries: number
   delay: number
+  source: string
   created_at: string
   updated_at: string
 }

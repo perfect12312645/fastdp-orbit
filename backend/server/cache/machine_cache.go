@@ -130,6 +130,18 @@ func (c *MachineCache) ListAgents() []string {
 	return result
 }
 
+// List 获取所有机器快照
+func (c *MachineCache) List() []*MachineSnapshot {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	result := make([]*MachineSnapshot, 0, len(c.machines))
+	for _, snap := range c.machines {
+		result = append(result, snap)
+	}
+	return result
+}
+
 // GetSnapshot 获取机器快照（供API返回缓存中的信息）
 func (c *MachineCache) GetSnapshot(ip string, port int) (*MachineSnapshot, bool) {
 	c.mu.RLock()

@@ -7,6 +7,7 @@ export interface StageTemplate {
   machine_group_id: number
   tasks: string // JSON string
   version: string
+  source: string
   created_at: string
   updated_at: string
 }
@@ -56,4 +57,14 @@ export function listStageTemplateVersionsApi(id: number): Promise<StageTemplateV
 /** 回滚到指定版本 */
 export function rollbackStageTemplateApi(id: number, version: string): Promise<void> {
   return request.post(`/stage-templates/${id}/rollback`, { version }).then((res) => res.data)
+}
+
+/** 单独执行一个阶段 */
+export function executeStageTemplateApi(id: number, machineGroupId?: number): Promise<{ execution_id: number }> {
+  return request.post(`/stage-templates/${id}/execute`, { machine_group_id: machineGroupId || 0 }).then((res) => res.data.data)
+}
+
+/** 获取阶段执行历史 */
+export function getExecutionHistoryApi(stageId: number): Promise<any[]> {
+  return request.get(`/stage-templates/${stageId}/executions`).then((res) => res.data.data)
 }

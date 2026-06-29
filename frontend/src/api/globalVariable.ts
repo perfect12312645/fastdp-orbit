@@ -7,6 +7,7 @@ export interface GlobalVariable {
   value: string
   description: string
   group: string
+  source: string
   created_at: string
   updated_at: string
 }

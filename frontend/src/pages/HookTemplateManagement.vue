@@ -20,6 +20,9 @@
               <Icon icon="mdi:magnify" :size="16" />
             </template>
           </el-input>
+          <el-select v-model="selectedGroup" placeholder="全部分组" clearable style="width: 160px;">
+            <el-option v-for="g in availableGroups" :key="g" :label="g || '(默认)'" :value="g" />
+          </el-select>
         </div>
         <div class="table-toolbar-right">
           <span class="total-text">共 {{ filteredTemplates.length }} 个钩子</span>
@@ -31,6 +34,12 @@
         <el-table-column label="模块" prop="module" width="120">
           <template #default="{ row }">
             <el-tag size="small" effect="plain">{{ row.module }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="分组" width="120">
+          <template #default="{ row }">
+            <el-tag v-if="row.source" size="small" type="info" effect="plain">{{ row.source }}</el-tag>
+            <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
         <el-table-column label="描述" prop="description" min-width="200" show-overflow-tooltip />
@@ -74,21 +83,51 @@
           <el-col :span="12">
             <el-form-item label="模块类型" prop="module">
                <el-select v-model="form.module" placeholder="选择模块" style="width: 100%">
-                 <el-option label="Shell" value="shell" />
-                 <el-option label="Script" value="script" />
-                 <el-option label="Systemd" value="systemd" />
-                 <el-option label="Package" value="package" />
-                 <el-option label="File" value="file" />
-                 <el-option label="Template" value="template" />
-                 <el-option label="Repo" value="repo" />
-                 <el-option label="Blockinfile" value="blockinfile" />
-                 <el-option label="Lineinfile" value="lineinfile" />
-                 <el-option label="File Pull" value="file_pull" />
-                 <el-option label="Cfssl" value="cfssl" />
-                 <el-option label="Image" value="image" />
-                 <el-option label="Unarchive" value="unarchive" />
-                 <el-option label="Copy" value="copy" />
-                 <el-option label="Modprobe" value="modprobe" />
+                 <el-option label="Shell" value="shell">
+                   <div class="module-option"><span class="module-option-name">Shell</span><span class="module-option-desc">执行Shell命令</span></div>
+                 </el-option>
+                 <el-option label="Script" value="script">
+                   <div class="module-option"><span class="module-option-name">Script</span><span class="module-option-desc">执行脚本内容</span></div>
+                 </el-option>
+                 <el-option label="Systemd" value="systemd">
+                   <div class="module-option"><span class="module-option-name">Systemd</span><span class="module-option-desc">管理服务（启动/停止/重启）</span></div>
+                 </el-option>
+                 <el-option label="Package" value="package">
+                   <div class="module-option"><span class="module-option-name">Package</span><span class="module-option-desc">安装/卸载软件包</span></div>
+                 </el-option>
+                 <el-option label="File" value="file">
+                   <div class="module-option"><span class="module-option-name">File</span><span class="module-option-desc">文件/目录操作</span></div>
+                 </el-option>
+                 <el-option label="Template" value="template">
+                   <div class="module-option"><span class="module-option-name">Template</span><span class="module-option-desc">渲染模板并写入文件</span></div>
+                 </el-option>
+                 <el-option label="Copy" value="copy">
+                   <div class="module-option"><span class="module-option-name">Copy</span><span class="module-option-desc">从Server分发文件到Agent</span></div>
+                 </el-option>
+                 <el-option label="File Pull" value="file_pull">
+                   <div class="module-option"><span class="module-option-name">File Pull</span><span class="module-option-desc">从URL拉取文件到Agent</span></div>
+                 </el-option>
+                 <el-option label="Unarchive" value="unarchive">
+                   <div class="module-option"><span class="module-option-name">Unarchive</span><span class="module-option-desc">解压文件</span></div>
+                 </el-option>
+                 <el-option label="Repo" value="repo">
+                   <div class="module-option"><span class="module-option-name">Repo</span><span class="module-option-desc">管理YUM/APT仓库</span></div>
+                 </el-option>
+                 <el-option label="Blockinfile" value="blockinfile">
+                   <div class="module-option"><span class="module-option-name">Blockinfile</span><span class="module-option-desc">在文件中插入/更新文本块</span></div>
+                 </el-option>
+                 <el-option label="Lineinfile" value="lineinfile">
+                   <div class="module-option"><span class="module-option-name">Lineinfile</span><span class="module-option-desc">在文件中插入/替换/删除行</span></div>
+                 </el-option>
+                 <el-option label="Cfssl" value="cfssl">
+                   <div class="module-option"><span class="module-option-name">Cfssl</span><span class="module-option-desc">生成TLS证书</span></div>
+                 </el-option>
+                 <el-option label="Image" value="image">
+                   <div class="module-option"><span class="module-option-name">Image</span><span class="module-option-desc">管理容器镜像</span></div>
+                 </el-option>
+                 <el-option label="Modprobe" value="modprobe">
+                   <div class="module-option"><span class="module-option-name">Modprobe</span><span class="module-option-desc">加载/卸载内核模块</span></div>
+                 </el-option>
                </el-select>
             </el-form-item>
           </el-col>
@@ -100,7 +139,20 @@
           <div class="params-kv-list">
             <div v-for="(key, pi) in Object.keys(formParams)" :key="pi" class="params-kv-row">
               <span class="params-kv-key">{{ key }}</span>
-              <el-input v-model="formParams[key]" :placeholder="getParamPlaceholder(form.module, key)" class="params-kv-value" />
+              <el-input
+                v-if="!isMultilineParam(form.module, key)"
+                v-model="formParams[key]"
+                :placeholder="getParamPlaceholder(form.module, key)"
+                class="params-kv-value"
+              />
+              <el-input
+                v-else
+                v-model="formParams[key]"
+                type="textarea"
+                :rows="4"
+                :placeholder="getParamPlaceholder(form.module, key)"
+                class="params-kv-value"
+              />
             </div>
             <div v-if="Object.keys(formParams).length === 0" class="params-empty">请先选择模块类型</div>
           </div>
@@ -150,21 +202,32 @@ import {
 import { HandledError } from '@/utils/request'
 
 const MODULE_PARAMS: Record<string, Record<string, string>> = {
-  shell: { command: '执行的命令' },
-  script: { script: '脚本内容', script_file: '脚本文件路径（可选）' },
-  systemd: { name: '服务名称', action: 'start/stop/restart/enable/disable' },
-  package: { name: '包名', state: 'present/absent/latest' },
-  file: { src: '源文件路径', dest: '目标路径' },
-  file_pull: { url: '文件URL [必填]', md5: '文件MD5 [必填]', dest: '目标路径', type: '类型[file/dir]' },
-  template: { src: '模板路径', dest: '目标路径' },
-  repo: { name: '仓库名', state: 'present/absent' },
-  blockinfile: { path: '文件路径', block: '插入的内容', marker: '标记注释', insertafter: '插入位置' },
-  lineinfile: { path: '文件路径 [必填]', regexp: '匹配正则 [必填]', line: '目标行 [必填]', action: 'insert/replace/delete [必填]', backrefs: '反向引用', insertbefore: '插入位置' },
-  modprobe: { name: '模块名', state: 'present/absent' },
-  cfssl: { action: '操作类型 [必填]: generate_ca/generate_cert' },
-  image: { action: '操作类型 [必填]: load/push/remove/pull', image: '镜像名称 [必填]' },
-  unarchive: { src: '源文件路径 [必填]', dest: '目标路径 [必填]', strip_components: '去除路径层级' },
-  copy: { src: 'Server端源文件路径（绝对路径）[必填]', dest: 'Agent端目标路径（绝对路径）[必填]', type: '类型[file/dir]', recursive: '递归', mode: '文件权限' },
+  shell: { command: '执行的命令 [必填]' },
+  script: { script: '脚本内容（与script_file二选一）', script_file: '脚本文件路径（与script二选一）' },
+  systemd: { name: '服务名称 [必填，reload操作可不填]', action: '操作类型 [必填]: start/stop/restart/reload/status/enable/disable' },
+  package: { action: '操作类型 [必填]: install/remove/update/check/localinstall', name: '包名（多包逗号分隔，localinstall时填文件路径）[必填]' },
+  file: { path: '目标路径（绝对路径）[必填]', action: '操作类型 [必填]: create/delete/touch/symlink', type: '文件类型（create/symlink时必填）: file/directory', src: '符号链接源路径（symlink时必填）', mode: '权限模式（可选），如 0644', owner: '所有者UID（可选）', group: '所属组GID（可选）', recurse: '递归创建目录（可选）: true/false', force: '强制删除非空目录（可选）: true/false', backup: '操作前备份（可选）: true/false' },
+  file_pull: { url: '文件URL（支持http/https）[必填]', dest: '目标路径（绝对路径，以/结尾则自动提取文件名）[必填]', md5: '文件MD5（可选，用于校验）' },
+  template: { src: '选择模板文件（与content二选一，引擎层渲染为content）', content: 'Go template模板内容（与src二选一，直接填写时使用）', dest: '目标路径（绝对路径）[必填]', append: '追加模式（可选）: true/false，默认false覆盖' },
+  repo: { action: '操作类型 [必填]: add/remove/test/backup/restore/makecache', name: '仓库名称（add/remove时必填）', url: '仓库URL（add/test时必填）' },
+  blockinfile: { action: '操作类型 [必填]: ensure/delete', path: '目标文件路径 [必填]', content: '文本块内容（ensure时必填，支持换行）', backup: '操作前备份（可选）: true/false' },
+  lineinfile: { path: '目标文件路径（绝对路径）[必填]', regexp: '匹配行的正则表达式 [必填]', line: '目标行内容（insert/replace时必填）', action: '操作类型 [必填]: insert/replace/delete', backrefs: '启用正则反向引用（仅replace时有效）: true/false', insertbefore: '插入到匹配行前（可选）: true/false，默认false插入到匹配行后' },
+  modprobe: { module: '内核模块名（与loop二选一）', loop: '模块列表（逗号分隔，与module二选一）', action: '操作类型（可选）: load/remove，默认load', options: '模块加载选项（可选）' },
+  cfssl: { action: '操作类型 [必填]: generate_ca/generate_cert', csr_path: 'CSR配置文件路径 [必填]', output_dir: '证书输出目录 [必填]', basename: '输出文件名前缀 [必填]', ca_cert: 'CA证书路径（generate_cert时必填）', ca_key: 'CA私钥路径（generate_cert时必填）', config_file: 'cfssl配置文件（generate_cert时必填）', profile: '配置profile名称（generate_cert时必填）' },
+  image: { action: '操作类型 [必填]: load/push/remove/pull', tag: '镜像标签（如nginx:latest）[必填]', path: '镜像文件路径（load时必填，绝对路径）' },
+  unarchive: { src: '压缩文件路径（绝对路径）[必填]', dest: '目标目录（绝对路径）[必填]', strip_components: '去除路径层级数（可选），如1' },
+  copy: { src: 'Server端源文件路径（绝对路径）[必填]', dest: 'Agent端目标路径（绝对路径）[必填]', type: '类型（可选）: file/dir', recursive: '递归复制（可选）: true/false', mode: '文件权限（可选），如 0644' },
+}
+
+// 需要多行输入的参数（textarea）
+const MULTILINE_PARAMS: Record<string, string[]> = {
+  blockinfile: ['content'],
+  script: ['script'],
+  template: ['content'],
+}
+
+function isMultilineParam(module: string, key: string): boolean {
+  return MULTILINE_PARAMS[module]?.includes(key) ?? false
 }
 
 function getParamPlaceholder(module: string, key: string): string {
@@ -173,6 +236,7 @@ function getParamPlaceholder(module: string, key: string): string {
 
 const loading = ref(false)
 const searchText = ref('')
+const selectedGroup = ref('')
 const templates = ref<HookTemplate[]>([])
 
 const dialogVisible = ref(false)
@@ -219,11 +283,22 @@ watch(() => form.value.module, (mod) => {
 })
 
 const filteredTemplates = computed(() => {
-  if (!searchText.value) return templates.value
-  const kw = searchText.value.toLowerCase()
-  return templates.value.filter(
-    (t) => t.name.toLowerCase().includes(kw) || (t.description || '').toLowerCase().includes(kw)
-  )
+  let result = templates.value
+  if (selectedGroup.value) {
+    result = result.filter(t => t.source === selectedGroup.value)
+  }
+  if (searchText.value) {
+    const kw = searchText.value.toLowerCase()
+    result = result.filter(
+      (t) => t.name.toLowerCase().includes(kw) || (t.description || '').toLowerCase().includes(kw)
+    )
+  }
+  return result
+})
+
+const availableGroups = computed(() => {
+  const groups = new Set(templates.value.map(t => t.source).filter(Boolean))
+  return Array.from(groups).sort()
 })
 
 async function loadData() {
@@ -380,5 +455,21 @@ onMounted(loadData)
   text-align: center;
   color: var(--el-text-color-secondary);
   font-size: 13px;
+}
+
+/* 模块选项样式 */
+.module-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 2px 0;
+}
+.module-option-name {
+  font-weight: 500;
+  min-width: 80px;
+}
+.module-option-desc {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
 }
 </style>

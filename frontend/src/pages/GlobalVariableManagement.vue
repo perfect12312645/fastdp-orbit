@@ -13,15 +13,18 @@
     </div>
 
     <div class="page-content">
-      <div class="table-toolbar">
+        <div class="table-toolbar">
         <div class="table-toolbar-left">
           <el-input v-model="searchText" placeholder="搜索变量名或描述" clearable style="width: 240px;">
             <template #prefix>
               <Icon icon="mdi:magnify" :size="16" />
             </template>
           </el-input>
-          <el-select v-model="filterGroup" placeholder="按分组筛选" clearable style="width: 160px;">
+          <el-select v-model="filterGroup" placeholder="按业务分组筛选" clearable style="width: 160px;">
             <el-option v-for="g in groupOptions" :key="g" :label="g" :value="g" />
+          </el-select>
+          <el-select v-model="selectedSource" placeholder="按来源筛选" clearable style="width: 160px;">
+            <el-option v-for="g in packageGroups" :key="g" :label="g || '(默认)'" :value="g" />
           </el-select>
         </div>
         <div class="table-toolbar-right">
@@ -148,6 +151,7 @@ import { formatDateTime } from '@/utils/format'
 const loading = ref(false)
 const searchText = ref('')
 const filterGroup = ref('')
+const selectedSource = ref('')
 const variables = ref<GlobalVariable[]>([])
 
 const sortField = ref('key')
@@ -172,6 +176,9 @@ const filteredVars = computed(() => {
   if (filterGroup.value) {
     result = result.filter((v) => v.group === filterGroup.value)
   }
+  if (selectedSource.value) {
+    result = result.filter((v) => v.source === selectedSource.value)
+  }
   if (searchText.value) {
     const kw = searchText.value.toLowerCase()
     result = result.filter(
@@ -186,6 +193,11 @@ const filteredVars = computed(() => {
     return sortDesc.value ? -cmp : cmp
   })
   return result
+})
+
+const packageGroups = computed(() => {
+  const groups = new Set(variables.value.map(v => v.source).filter(Boolean))
+  return Array.from(groups).sort()
 })
 
 const paginatedData = computed(() => {

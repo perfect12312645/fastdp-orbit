@@ -28,6 +28,11 @@ func NewService(db *gorm.DB) *Service {
 	return &Service{db: db}
 }
 
+// DB 获取数据库实例
+func (s *Service) DB() *gorm.DB {
+	return s.db
+}
+
 // ListWorkflows 获取所有工作流（不含关联数据，列表用）
 func (s *Service) ListWorkflows() ([]workflow.Workflow, error) {
 	var wfs []workflow.Workflow
@@ -389,10 +394,14 @@ func ValidateStageTemplate(name string, tasksJSON string) error {
 	return nil
 }
 
-// ListStageTemplates 获取所有阶段模板
-func (s *Service) ListStageTemplates() ([]workflow.StageTemplate, error) {
+// ListStageTemplates 获取阶段模板（支持按分组过滤）
+func (s *Service) ListStageTemplates(packageGroup string) ([]workflow.StageTemplate, error) {
 	var templates []workflow.StageTemplate
-	if err := s.db.Order("created_at DESC").Find(&templates).Error; err != nil {
+	query := s.db.Order("created_at DESC")
+	if packageGroup != "" {
+		query = query.Where("package_group = ?", packageGroup)
+	}
+	if err := query.Find(&templates).Error; err != nil {
 		return nil, err
 	}
 	return templates, nil
@@ -410,16 +419,16 @@ func (s *Service) GetStageTemplate(id uint) (*workflow.StageTemplate, error) {
 // CreateStageTemplate 创建阶段模板（初始版本）
 func (s *Service) CreateStageTemplate(t *workflow.StageTemplate) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
-		// 检查 name 唯一性（已软删除的不算）
+		// 检查 name 唯一性（同分组内，已软删除的不算）
 		var count int64
 		if err := tx.Model(&workflow.StageTemplate{}).
-			Where("name = ?", t.Name).
+			Where("name = ? AND package_group = ?", t.Name, t.Source).
 			Count(&count).Error; err != nil {
 			return err
 		}
 		if count > 0 {
 			return errs.NewConflict(errs.CodeStageTemplateNameDuplicate,
-				fmt.Sprintf("阶段名称「%s」已存在", t.Name))
+				fmt.Sprintf("阶段名称「%s」在当前分组已存在", t.Name))
 		}
 
 		// 校验任务
@@ -457,17 +466,17 @@ func (s *Service) UpdateStageTemplate(id uint, t *workflow.StageTemplate, change
 			return err
 		}
 
-		// 如果 name 有变化，检查新 name 唯一性（排除自身和已软删除的）
+		// 如果 name 有变化，检查新 name 唯一性（同分组内，排除自身和已软删除的）
 		if t.Name != existing.Name {
 			var count int64
 			if err := tx.Model(&workflow.StageTemplate{}).
-				Where("name = ? AND id != ?", t.Name, id).
+				Where("name = ? AND package_group = ? AND id != ?", t.Name, t.Source, id).
 				Count(&count).Error; err != nil {
 				return err
 			}
 			if count > 0 {
 				return errs.NewConflict(errs.CodeStageTemplateNameDuplicate,
-					fmt.Sprintf("阶段名称「%s」已存在", t.Name))
+					fmt.Sprintf("阶段名称「%s」在当前分组已存在", t.Name))
 			}
 		}
 
@@ -550,10 +559,14 @@ func (s *Service) RollbackStageTemplate(templateID uint, targetVersion string) e
 
 // ==================== GlobalVariable ====================
 
-// ListGlobalVariables 获取所有全局变量
-func (s *Service) ListGlobalVariables() ([]workflow.GlobalVariable, error) {
+// ListGlobalVariables 获取全局变量（支持按分组过滤）
+func (s *Service) ListGlobalVariables(packageGroup string) ([]workflow.GlobalVariable, error) {
 	var vars []workflow.GlobalVariable
-	if err := s.db.Order("`group` ASC, `key` ASC").Find(&vars).Error; err != nil {
+	query := s.db.Order("`group` ASC, `key` ASC")
+	if packageGroup != "" {
+		query = query.Where("package_group = ?", packageGroup)
+	}
+	if err := query.Find(&vars).Error; err != nil {
 		return nil, err
 	}
 	return vars, nil
@@ -570,13 +583,13 @@ func (s *Service) GetGlobalVariable(id uint) (*workflow.GlobalVariable, error) {
 
 // CreateGlobalVariable 创建全局变量
 func (s *Service) CreateGlobalVariable(v *workflow.GlobalVariable) error {
-	// 检查变量名唯一性
+	// 检查变量名唯一性（同分组内）
 	var count int64
-	if err := s.db.Model(&workflow.GlobalVariable{}).Where("key = ?", v.Key).Count(&count).Error; err != nil {
+	if err := s.db.Model(&workflow.GlobalVariable{}).Where("key = ? AND package_group = ?", v.Key, v.Source).Count(&count).Error; err != nil {
 		return err
 	}
 	if count > 0 {
-		return fmt.Errorf("变量名「%s」已存在", v.Key)
+		return fmt.Errorf("变量名「%s」在当前分组已存在", v.Key)
 	}
 	if v.Value == "" {
 		return fmt.Errorf("变量值不能为空")
@@ -586,13 +599,13 @@ func (s *Service) CreateGlobalVariable(v *workflow.GlobalVariable) error {
 
 // UpdateGlobalVariable 更新全局变量
 func (s *Service) UpdateGlobalVariable(id uint, v *workflow.GlobalVariable) error {
-	// 检查变量名唯一性（排除自身）
+	// 检查变量名唯一性（同分组内，排除自身）
 	var count int64
-	if err := s.db.Model(&workflow.GlobalVariable{}).Where("key = ? AND id != ?", v.Key, id).Count(&count).Error; err != nil {
+	if err := s.db.Model(&workflow.GlobalVariable{}).Where("key = ? AND package_group = ? AND id != ?", v.Key, v.Source, id).Count(&count).Error; err != nil {
 		return err
 	}
 	if count > 0 {
-		return fmt.Errorf("变量名「%s」已存在", v.Key)
+		return fmt.Errorf("变量名「%s」在当前分组已存在", v.Key)
 	}
 	if v.Value == "" {
 		return fmt.Errorf("变量值不能为空")

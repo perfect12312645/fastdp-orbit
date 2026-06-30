@@ -65,7 +65,6 @@ func CreateWorkflowTemplate(c *gin.Context) {
 		Name:        req.Name,
 		Description: req.Description,
 		Content:     req.Content,
-		Variables:   req.Variables,
 	}
 	if err := WorkflowService.CreateWorkflowTemplate(t); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "message": err.Error()})
@@ -120,7 +119,6 @@ func UpdateWorkflowTemplate(c *gin.Context) {
 		Name:        req.Name,
 		Description: req.Description,
 		Content:     req.Content,
-		Variables:   req.Variables,
 	}
 	if err := WorkflowService.UpdateWorkflowTemplate(uint(id), t); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "message": err.Error()})

@@ -114,6 +114,19 @@ func main() {
 	eng := orchestrator.NewOrchestrator(db, agentConnPool, cfg.GetServerListenAddr(), Protocol)
 	views.Orchestrator = eng
 
+	// 创建单阶段执行服务
+	stageExecService := workflowsvc.NewStageExecutionService(db)
+	stageExecService.SetExecuteTaskFunc(eng.ExecuteTaskForStage)
+	stageExecService.SetEmitFuncs(
+		func(executionID uint, taskRef int, taskName string, status string, host string, output string, errStr string, trace string, errorCode int32, changed bool, duration int64) {
+			views.BroadcastTaskStatus(executionID, 0, taskRef, taskName, status, host, output, errStr, trace, errorCode, changed, duration)
+		},
+		func(executionID uint, status string) {
+			views.BroadcastExecutionStatus(executionID, status, "")
+		},
+	)
+	views.StageExecutionService = stageExecService
+
 	// 设置 SSE 事件监听器
 	eng.SetEventListener(&views.SSEListener{})
 

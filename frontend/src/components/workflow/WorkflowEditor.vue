@@ -231,7 +231,7 @@
                   </div>
                   <el-input v-model="task.when" placeholder='条件，如: {{.machine.os_name}} !contains ubuntu' style="width: 100%" />
                   <div class="task-row">
-                    <el-input v-model="task.hook_ids" placeholder='后置钩子 ref，如: [1,3]' style="flex: 1" />
+                    <el-input v-model="task.hooks" placeholder='后置钩子 ref，如: [1,3]' style="flex: 1" />
                     <el-input v-model="task.register" placeholder="注册变量名" style="width: 150px" />
                     <el-checkbox v-model="task.ignore_errors">忽略错误</el-checkbox>
                   </div>
@@ -378,7 +378,7 @@ function addTask() {
     params: '',
     order: selectedStage.value.tasks.length + 1,
     when: '',
-    hook_ids: '',
+    hooks: '',
     loop: '',
     loop_mode: 'simple',
     loop_keys: [],

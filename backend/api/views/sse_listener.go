@@ -15,6 +15,6 @@ func (l *SSEListener) OnStageStatus(executionID uint, stageID uint, status strin
 	BroadcastStageStatus(executionID, stageID, status)
 }
 
-func (l *SSEListener) OnTaskStatus(executionID uint, taskID uint, status string, host string, output string, errStr string, duration int64) {
-	BroadcastTaskStatus(executionID, taskID, status, host, output, errStr, duration)
+func (l *SSEListener) OnTaskStatus(executionID uint, taskID uint, taskRef int, taskName string, status string, host string, output string, errStr string, trace string, errorCode int32, changed bool, duration int64) {
+	BroadcastTaskStatus(executionID, taskID, taskRef, taskName, status, host, output, errStr, trace, errorCode, changed, duration)
 }

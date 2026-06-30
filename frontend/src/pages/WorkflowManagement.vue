@@ -39,13 +39,16 @@
             {{ formatDateTime(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="140" fixed="right">
+        <el-table-column label="操作" width="200" fixed="right">
           <template #default="{ row }">
             <el-button type="primary" link size="small" @click="openCanvas(row)">
               <Icon icon="mdi:eye" :size="14" /> 查看
             </el-button>
+            <el-button type="info" link size="small" @click="showExecutionHistory(row)">
+              <Icon icon="mdi:history" :size="14" /> 执行记录
+            </el-button>
             <el-button type="danger" link size="small" @click="deleteWorkflow(row)">
-              <Icon icon="mdi:delete" :size="14" /> 删除
+              <Icon icon="mdi:delete" :size="14" />
             </el-button>
           </template>
         </el-table-column>
@@ -79,6 +82,64 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- 执行历史对话框 -->
+    <el-dialog v-model="executionHistoryVisible" title="执行记录" width="800px" destroy-on-close>
+      <div v-if="selectedWorkflow">
+        <p style="margin-bottom: 16px; color: var(--el-text-color-secondary); font-size: 14px;">
+          工作流：<strong>{{ selectedWorkflow.name }}</strong>
+        </p>
+        <el-table :data="executionHistory" v-loading="executionHistoryLoading" stripe>
+          <el-table-column label="执行ID" prop="id" width="80" />
+          <el-table-column label="状态" width="100">
+            <template #default="{ row }">
+              <el-tag :type="getStatusType(row.status)" size="small">
+                {{ getStatusLabel(row.status) }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="触发方式" width="100" prop="trigger" />
+          <el-table-column label="错误" min-width="150" show-overflow-tooltip>
+            <template #default="{ row }">
+              <span v-if="row.error" style="color: var(--el-color-danger);">{{ row.error }}</span>
+              <span v-else style="color: var(--el-text-color-secondary);">-</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="开始时间" width="170">
+            <template #default="{ row }">
+              {{ formatDateTime(row.started_at) }}
+            </template>
+          </el-table-column>
+          <el-table-column label="结束时间" width="170">
+            <template #default="{ row }">
+              {{ row.finished_at ? formatDateTime(row.finished_at) : '-' }}
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="160" fixed="right">
+            <template #default="{ row }">
+              <el-button type="primary" link size="small" @click="viewExecution(row)">
+                <Icon icon="mdi:console" :size="14" /> 详情
+              </el-button>
+              <el-button
+                v-if="row.status !== 'running'"
+                type="danger"
+                link
+                size="small"
+                @click="deleteExecutionRecord(row)"
+              >
+                <Icon icon="mdi:delete-outline" :size="14" />
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <div v-if="executionHistory.length === 0 && !executionHistoryLoading" style="text-align: center; padding: 40px; color: var(--el-text-color-secondary);">
+          暂无执行记录
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="executionHistoryVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -92,6 +153,8 @@ import {
   getWorkflowsApi,
   createWorkflowApi,
   deleteWorkflowApi,
+  getExecutionsApi,
+  deleteExecutionApi,
 } from '@/api/workflow'
 import type { Workflow } from '@/types/workflow'
 
@@ -123,6 +186,12 @@ const createForm = ref({ name: '', description: '' })
 const createRules = {
   name: [{ required: true, message: '请输入工作流名称', trigger: 'blur' }],
 }
+
+// 执行历史
+const executionHistoryVisible = ref(false)
+const selectedWorkflow = ref<Workflow | null>(null)
+const executionHistory = ref<any[]>([])
+const executionHistoryLoading = ref(false)
 
 async function loadData() {
   loading.value = true
@@ -182,6 +251,67 @@ async function deleteWorkflow(row: Workflow) {
   } catch (e) {
     if (e !== 'cancel') ElMessage.error('删除失败')
   }
+}
+
+// 执行历史
+async function showExecutionHistory(row: Workflow) {
+  selectedWorkflow.value = row
+  executionHistoryVisible.value = true
+  executionHistoryLoading.value = true
+  try {
+    executionHistory.value = await getExecutionsApi(row.id)
+  } catch {
+    executionHistory.value = []
+  } finally {
+    executionHistoryLoading.value = false
+  }
+}
+
+function viewExecution(row: any) {
+  if (selectedWorkflow.value) {
+    router.push(`/workflow/${selectedWorkflow.value.id}/executions/${row.id}`)
+  }
+}
+
+async function deleteExecutionRecord(row: any) {
+  if (!selectedWorkflow.value) return
+  try {
+    await ElMessageBox.confirm('确认删除该执行记录？', '删除确认', {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+    await deleteExecutionApi(selectedWorkflow.value.id, row.id)
+    ElMessage.success('删除成功')
+    // 刷新列表
+    executionHistory.value = await getExecutionsApi(selectedWorkflow.value.id)
+  } catch (e: any) {
+    if (e !== 'cancel') ElMessage.error(e?.message || '删除失败')
+  }
+}
+
+function getStatusType(status: string) {
+  const map: Record<string, string> = {
+    running: 'warning',
+    success: 'success',
+    failed: 'danger',
+    paused: 'info',
+    cancelled: 'info',
+    pending: 'info',
+  }
+  return (map[status] || 'info') as any
+}
+
+function getStatusLabel(status: string) {
+  const map: Record<string, string> = {
+    running: '运行中',
+    success: '成功',
+    failed: '失败',
+    paused: '已暂停',
+    cancelled: '已终止',
+    pending: '等待中',
+  }
+  return map[status] || status
 }
 
 onMounted(loadData)

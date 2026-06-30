@@ -68,8 +68,8 @@ type WorkflowTask struct {
 
 	// 条件执行（Go 模板表达式，如 "{{.machine.os_name}} == ubuntu"）
 	When string `json:"when" gorm:"size:500"`
-	// 后置钩子（引用 WorkflowHook 的 ID 列表，JSON 数组如 [1,3,5]）
-	HookIDs string `json:"hook_ids" gorm:"type:text"`
+	// 后置钩子（钩子名称列表，JSON 数组如 ["test","rollback"]）
+	Hooks string `json:"hooks" gorm:"type:text"`
 	// 循环执行（JSON 数组，如 '["item1","item2"]'），使用 {{.item}} 引用当前项
 	Loop string `json:"loop" gorm:"type:text"`
 	// 超时（秒），0表示不超时
@@ -153,22 +153,22 @@ type WorkflowStageExecution struct {
 
 // WorkflowTaskExecution 任务执行记录
 type WorkflowTaskExecution struct {
-	ID                uint                   `json:"id" gorm:"primaryKey"`
-	StageExecutionID  uint                   `json:"stage_execution_id" gorm:"index;not null"`
-	TaskID            uint                   `json:"task_id" gorm:"index;not null"`
-	Task              *WorkflowTask          `json:"task,omitempty" gorm:"foreignKey:TaskID"`
-	Host              string                 `json:"host" gorm:"size:100"`                       // 目标机器 ip:port
-	Status            string                 `json:"status" gorm:"size:20;default:pending"`       // pending/running/success/failed/skipped
-	Output            string                 `json:"output" gorm:"type:text"`                     // 标准输出
-	Error             string                 `json:"error" gorm:"type:text"`                      // 错误信息
-	ErrorCode         int32                  `json:"error_code"`                                  // 错误码
-	Changed           bool                   `json:"changed"`                                     // 是否产生变更
-	LoopItem          string                 `json:"loop_item" gorm:"size:500"`                   // 循环项（展示用）
-	HookStatus        string                 `json:"hook_status" gorm:"size:20;default:none"`     // 钩子执行状态: none/running/success/failed
-	HookError         string                 `json:"hook_error" gorm:"type:text"`                 // 钩子失败原因
-	DurationMs        int64                  `json:"duration_ms"`                                 // 执行耗时（毫秒）
-	StartedAt         *time.Time             `json:"started_at"`
-	FinishedAt        *time.Time             `json:"finished_at"`
+	ID               uint          `json:"id" gorm:"primaryKey"`
+	StageExecutionID uint          `json:"stage_execution_id" gorm:"index;not null"`
+	TaskID           uint          `json:"task_id" gorm:"index;not null"`
+	Task             *WorkflowTask `json:"task,omitempty" gorm:"foreignKey:TaskID"`
+	Host             string        `json:"host" gorm:"size:100"`                       // 目标机器 ip:port
+	Status           string        `json:"status" gorm:"size:20;default:pending"`       // pending/running/success/failed/skipped
+	Output           string        `json:"output" gorm:"type:text"`                     // 标准输出
+	Error            string        `json:"error" gorm:"type:text"`                      // 错误信息
+	ErrorCode        int32         `json:"error_code"`                                  // 错误码
+	Trace            string        `json:"trace" gorm:"type:text"`                      // 错误堆栈
+	Changed          bool          `json:"changed"`                                     // 是否产生变更
+	HookStatus       string        `json:"hook_status" gorm:"size:20;default:none"`     // 钩子执行状态: none/running/success/failed
+	HookError        string        `json:"hook_error" gorm:"type:text"`                 // 钩子失败原因
+	DurationMs       int64         `json:"duration_ms"`                                 // 执行耗时（毫秒）
+	StartedAt        *time.Time    `json:"started_at"`
+	FinishedAt       *time.Time    `json:"finished_at"`
 }
 
 // TableName 指定表名

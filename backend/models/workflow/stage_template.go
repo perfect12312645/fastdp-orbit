@@ -28,7 +28,7 @@ type StageTask struct {
 	Params       string `json:"params"`
 	Order        int    `json:"order"`
 	When         string `json:"when"`
-	HookIDs      string `json:"hook_ids"`
+	Hooks        string `json:"hooks"`
 	Loop         string `json:"loop"`
 	Timeout      int    `json:"timeout"`
 	IgnoreErrors bool   `json:"ignore_errors"`

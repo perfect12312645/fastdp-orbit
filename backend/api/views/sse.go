@@ -19,8 +19,13 @@ type SSEEvent struct {
 	GroupID     uint   `json:"group_id,omitempty"`
 	StageID     uint   `json:"stage_id,omitempty"`
 	TaskID      uint   `json:"task_id,omitempty"`
+	TaskRef     int    `json:"ref,omitempty"`
+	TaskName    string `json:"task_name,omitempty"`
 	Error       string `json:"error,omitempty"`
+	ErrorCode   int32  `json:"error_code,omitempty"`
+	Trace       string `json:"trace,omitempty"`
 	Output      string `json:"output,omitempty"`
+	Changed     bool   `json:"changed"`
 	Duration    int64  `json:"duration_ms,omitempty"`
 	Host        string `json:"host,omitempty"`
 }
@@ -169,15 +174,20 @@ func BroadcastStageStatus(executionID uint, stageID uint, status string) {
 }
 
 // BroadcastTaskStatus 广播任务状态变更
-func BroadcastTaskStatus(executionID uint, taskID uint, status string, host string, output string, errStr string, duration int64) {
+func BroadcastTaskStatus(executionID uint, taskID uint, taskRef int, taskName string, status string, host string, output string, errStr string, trace string, errorCode int32, changed bool, duration int64) {
 	Hub.Broadcast(SSEEvent{
 		ExecutionID: executionID,
 		Type:        "task_status",
 		TaskID:      taskID,
+		TaskRef:     taskRef,
+		TaskName:    taskName,
 		Status:      status,
 		Host:        host,
 		Output:      output,
 		Error:       errStr,
+		Trace:       trace,
+		ErrorCode:   errorCode,
+		Changed:     changed,
 		Duration:    duration,
 	})
 }

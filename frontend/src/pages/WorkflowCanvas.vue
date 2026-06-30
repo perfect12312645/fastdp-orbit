@@ -271,7 +271,7 @@
     </div>
 
     <!-- 执行历史对话框 -->
-    <el-dialog v-model="showExecHistory" title="执行历史" width="700px" destroy-on-close @open="loadExecHistory">
+    <el-dialog v-model="showExecHistory" title="执行历史" width="800px" destroy-on-close @open="loadExecHistory">
       <el-table :data="execHistory" v-loading="loadingExecHistory" stripe>
         <el-table-column prop="id" label="ID" width="70" />
         <el-table-column prop="status" label="状态" width="100">
@@ -280,17 +280,31 @@
           </template>
         </el-table-column>
         <el-table-column prop="trigger" label="触发者" width="100" />
-        <el-table-column prop="error" label="错误信息" min-width="150" show-overflow-tooltip />
+        <el-table-column prop="error" label="错误信息" min-width="150" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span v-if="row.error" style="color: var(--el-color-danger);">{{ row.error }}</span>
+            <span v-else style="color: var(--el-text-color-secondary);">-</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="started_at" label="开始时间" width="170">
           <template #default="{ row }">{{ formatDateTime(row.started_at) }}</template>
         </el-table-column>
         <el-table-column prop="finished_at" label="结束时间" width="170">
           <template #default="{ row }">{{ row.finished_at ? formatDateTime(row.finished_at) : '-' }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="100">
+        <el-table-column label="操作" width="160" fixed="right">
           <template #default="{ row }">
             <el-button type="primary" link size="small" @click="goToExecution(row.id)">
               <Icon icon="mdi:eye" :size="14" /> 详情
+            </el-button>
+            <el-button
+              v-if="row.status !== 'running'"
+              type="danger"
+              link
+              size="small"
+              @click="deleteExecution(row)"
+            >
+              <Icon icon="mdi:delete-outline" :size="14" />
             </el-button>
           </template>
         </el-table-column>
@@ -314,26 +328,34 @@
           </div>
           <div v-if="stageDetailData.task_executions?.length" class="task-list">
             <div
-              v-for="te in stageDetailData.task_executions"
-              :key="te.id"
+              v-for="group in groupTasksByRef(stageDetailData.task_executions)"
+              :key="group.ref"
               class="task-detail-card"
             >
               <div class="task-detail-header">
-                <Icon :icon="getTaskIcon(te.status)" :size="14" :class="'status-' + te.status" />
-                <span class="task-detail-name">{{ te.task?.name || `Task #${te.task_id}` }}</span>
-                <span class="task-detail-host">{{ te.host }}</span>
-                <el-tag :type="getExecStatusType(te.status)" size="small">{{ getExecStatusLabel(te.status) }}</el-tag>
+                <Icon :icon="getTaskIcon(group.machines[0]?.status)" :size="14" :class="'status-' + group.machines[0]?.status" />
+                <span class="task-detail-name">任务-{{ group.ref }} {{ group.name }}</span>
+                <span v-if="group.module" class="task-detail-module">{{ group.module }}</span>
               </div>
-              <div v-if="te.duration_ms" class="task-detail-duration">
-                耗时 {{ te.duration_ms }}ms
-              </div>
-              <div v-if="te.output" class="task-output">
-                <div class="output-label">输出</div>
-                <pre>{{ te.output }}</pre>
-              </div>
-              <div v-if="te.error" class="task-error">
-                <div class="output-label">错误</div>
-                <pre>{{ te.error }}</pre>
+              <div class="task-machines">
+                <div
+                  v-for="(te, tei) in group.machines"
+                  :key="te.id"
+                  class="task-machine-item"
+                  :class="getTaskBorderClass(te.status, te.changed)"
+                >
+                  <div class="machine-row">
+                    <span class="task-detail-host">{{ te.host }}</span>
+                    <span v-if="te.duration_ms" class="task-detail-duration">{{ te.duration_ms }}ms</span>
+                    <el-tag :type="getExecStatusType(te.status)" size="small">{{ getExecStatusLabel(te.status) }}</el-tag>
+                  </div>
+                  <div v-if="te.output" class="task-output">
+                    <pre>{{ te.output }}</pre>
+                  </div>
+                  <div v-if="te.error" class="task-error">
+                    <pre>{{ te.error }}</pre>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -386,6 +408,7 @@ import {
   resumeExecutionApi,
   cancelExecutionApi,
   retryStageApi,
+  deleteExecutionApi,
 } from '@/api/workflow'
 import { getMachineGroupsApi, type MachineGroup } from '@/api/machineGroup'
 import { getStageTemplatesApi, type StageTemplate as StageTemplateApi } from '@/api/stageTemplate'
@@ -669,6 +692,45 @@ function goToExecution(execId: number) {
   router.push(`/workflow/${workflowId.value}/executions/${execId}`)
 }
 
+// 按 task_ref 分组任务执行记录
+function groupTasksByRef(taskExecutions: any[]) {
+  const groups = new Map<number, { ref: number; name: string; module: string; machines: any[] }>()
+  for (const te of taskExecutions) {
+    const ref = te.task?.ref || te.task_id
+    if (!groups.has(ref)) {
+      groups.set(ref, {
+        ref,
+        name: te.task?.name || `Task #${te.task_id}`,
+        module: te.task?.module || '',
+        machines: [],
+      })
+    }
+    groups.get(ref)!.machines.push(te)
+  }
+  return Array.from(groups.values())
+}
+
+// 获取任务边框颜色类
+function getTaskBorderClass(status: string, changed?: boolean) {
+  if (status === 'success' && changed === false) return 'status-border-unchanged'
+  return 'status-border-' + status
+}
+
+async function deleteExecution(row: any) {
+  try {
+    await ElMessageBox.confirm('确认删除该执行记录？', '删除确认', {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+    await deleteExecutionApi(workflowId.value, row.id)
+    ElMessage.success('删除成功')
+    loadExecHistory()
+  } catch (e: any) {
+    if (e !== 'cancel') ElMessage.error(e?.message || '删除失败')
+  }
+}
+
 // ==================== SSE 实时推送 ====================
 let nextTempId = -1
 
@@ -933,7 +995,7 @@ function onDropToGroup(e: DragEvent, groupIndex: number) {
         params: typeof t.params === 'object' ? JSON.stringify(t.params) : (t.params || ''),
         order: i + 1,
         when: t.when || '',
-        hook_ids: t.hook_ids || '',
+        hooks: t.hooks || '',
         loop: t.loop || '',
         timeout: t.timeout || 0,
         ignore_errors: t.ignore_errors ?? false,
@@ -1032,7 +1094,7 @@ async function handleSave() {
           params: t.params || '',
           order: ti + 1,
           when: t.when || '',
-          hook_ids: t.hook_ids || '',
+          hooks: t.hooks || '',
           loop: t.loop || '',
           timeout: t.timeout || 0,
           ignore_errors: t.ignore_errors ?? false,
@@ -1071,9 +1133,9 @@ function buildHooksSnapshot(stageGroups: any[]) {
   for (const g of stageGroups) {
     for (const s of g.stages || []) {
       for (const t of s.tasks || []) {
-        if (t.hook_ids) {
+        if (t.hooks) {
           try {
-            const arr = JSON.parse(t.hook_ids)
+            const arr = JSON.parse(t.hooks)
             if (Array.isArray(arr)) arr.forEach((n: string) => hookNames.add(n))
           } catch { /* skip */ }
         }
@@ -1649,12 +1711,21 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+  margin-bottom: 8px;
 }
 
 .task-detail-name {
   font-weight: 500;
   font-size: 13px;
   flex: 1;
+}
+
+.task-detail-module {
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color-lighter);
+  padding: 1px 6px;
+  border-radius: 4px;
 }
 
 .task-detail-host {
@@ -1668,6 +1739,48 @@ onUnmounted(() => {
   color: var(--el-text-color-secondary);
 }
 
+.task-machines {
+  margin-left: 24px;
+  margin-top: 4px;
+}
+
+.task-machine-item {
+  padding: 6px 8px;
+  border-left: 3px solid transparent;
+  margin-bottom: 4px;
+}
+
+.task-machine-item:last-child {
+  margin-bottom: 0;
+}
+
+.status-border-success {
+  border-left-color: var(--el-color-success);
+}
+
+.status-border-unchanged {
+  border-left-color: #f5d76e;
+}
+
+.status-border-failed {
+  border-left-color: var(--el-color-danger);
+}
+
+.status-border-running {
+  border-left-color: var(--el-color-warning);
+}
+
+.status-border-pending {
+  border-left-color: var(--el-text-color-secondary);
+}
+
+.machine-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
 .output-label {
   font-size: 11px;
   font-weight: 600;
@@ -1678,7 +1791,7 @@ onUnmounted(() => {
 
 .task-output,
 .task-error {
-  margin-top: 8px;
+  margin-top: 4px;
   border-radius: 4px;
   font-size: 12px;
   overflow-x: auto;

@@ -102,40 +102,52 @@
                 <div class="task-header">
                   <Icon :icon="getTaskIcon(se.status)" :size="16" :class="'status-' + se.status" />
                   <span class="task-name">{{ se.stage?.name || `Stage #${se.stage_id}` }}</span>
-                  <span class="task-host">{{ se.stage?.tasks?.length || 0 }} 个任务</span>
+                  <span class="task-host">{{ se.task_executions?.length || 0 }} 个任务</span>
                   <el-tag :type="getStatusType(se.status)" size="small">
                     {{ getStatusLabel(se.status) }}
                   </el-tag>
                 </div>
 
-                <!-- 任务执行列表 -->
+                <!-- 任务执行列表 - 按 ref 分组 -->
                 <div class="subtasks-container" v-if="se.task_executions?.length">
                   <div
-                    v-for="(te, tei) in se.task_executions"
-                    :key="te.id"
+                    v-for="group in groupTasksByRef(se.task_executions)"
+                    :key="group.ref"
                     class="subtask-item"
                   >
                     <div class="task-header">
-                      <Icon :icon="getTaskIcon(te.status)" :size="14" :class="'status-' + te.status" />
-                      <span class="task-name">{{ te.task?.name || `Task #${te.task_id}` }}</span>
-                      <span class="task-host">{{ te.host }}</span>
-                      <span class="task-duration" v-if="te.duration_ms">{{ te.duration_ms }}ms</span>
-                      <el-tag :type="getStatusType(te.status)" size="small">
-                        {{ getStatusLabel(te.status) }}
-                      </el-tag>
+                      <Icon :icon="getTaskIcon(group.machines[0]?.status, group.machines[0]?.changed)" :size="14" :class="'status-' + group.machines[0]?.status" />
+                      <span class="task-name">任务-{{ group.ref }} {{ group.name }}</span>
+                      <span class="task-module" v-if="group.module">{{ group.module }}</span>
                     </div>
-                    <div class="task-output" v-if="te.output">
-                      <pre>{{ te.output }}</pre>
-                    </div>
-                    <div class="task-error" v-if="te.error">
-                      <pre>{{ te.error }}</pre>
-                    </div>
-                    <div class="task-hook-status" v-if="te.hook_status && te.hook_status !== 'none'">
-                      <span class="hook-label">钩子:</span>
-                      <el-tag :type="te.hook_status === 'success' ? 'success' : te.hook_status === 'failed' ? 'danger' : 'warning'" size="small">
-                        {{ te.hook_status === 'success' ? '成功' : te.hook_status === 'failed' ? '失败' : '执行中' }}
-                      </el-tag>
-                      <span class="hook-error" v-if="te.hook_error">{{ te.hook_error }}</span>
+                    <div class="subtask-machines">
+                      <div
+                        v-for="(te, tei) in group.machines"
+                        :key="te.id"
+                        class="subtask-machine"
+                        :class="getTaskClass(te.status, te.changed)"
+                      >
+                        <div class="machine-header">
+                          <span class="task-host">{{ te.host }}</span>
+                          <span class="task-duration" v-if="te.duration_ms">{{ te.duration_ms }}ms</span>
+                        </div>
+                        <div class="task-output" v-if="te.output">
+                          <pre>{{ te.output }}</pre>
+                        </div>
+                        <div class="task-error" v-if="te.error">
+                          <pre>{{ te.error }}</pre>
+                        </div>
+                        <div class="task-trace" v-if="te.trace">
+                          <pre>{{ te.trace }}</pre>
+                        </div>
+                        <div class="task-hook-status" v-if="te.hook_status && te.hook_status !== 'none'">
+                          <span class="hook-label">钩子:</span>
+                          <el-tag :type="te.hook_status === 'success' ? 'success' : te.hook_status === 'failed' ? 'danger' : 'warning'" size="small">
+                            {{ te.hook_status === 'success' ? '成功' : te.hook_status === 'failed' ? '失败' : '执行中' }}
+                          </el-tag>
+                          <span class="hook-error" v-if="te.hook_error">{{ te.hook_error }}</span>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -184,6 +196,24 @@ const isRunning = computed(() => {
   ) ?? false
 })
 
+// 按 task_ref 分组任务执行记录
+function groupTasksByRef(taskExecutions: any[]) {
+  const groups = new Map<number, { ref: number; name: string; module: string; machines: any[] }>()
+  for (const te of taskExecutions) {
+    const ref = te.task?.ref || te.task_id
+    if (!groups.has(ref)) {
+      groups.set(ref, {
+        ref,
+        name: te.task?.name || `Task #${te.task_id}`,
+        module: te.task?.module || '',
+        machines: [],
+      })
+    }
+    groups.get(ref)!.machines.push(te)
+  }
+  return Array.from(groups.values())
+}
+
 async function loadExecution() {
   loading.value = true
   try {
@@ -206,6 +236,10 @@ function connectSSE() {
     const data = JSON.parse(e.data)
     if (execution.value && execution.value.id === data.execution_id) {
       execution.value = { ...execution.value, status: data.status, error: data.error || execution.value.error }
+      if (data.status === 'success' || data.status === 'failed' || data.status === 'cancelled') {
+        disconnectSSE()
+        loadExecution()
+      }
     }
   })
   eventSource.addEventListener('group_status', (e) => {
@@ -325,24 +359,6 @@ async function handleRetryExecution() {
   }
 }
 
-async function handleRunningAction(command: string) {
-  if (command === 'retry') {
-    try {
-      await ElMessageBox.confirm(
-        '确认强制重试？适用于服务重启后执行卡死的情况，将从失败处重新执行。',
-        '强制重试',
-        { confirmButtonText: '确认重试', cancelButtonText: '取消', type: 'warning' }
-      )
-      await retryExecutionApi(workflowId.value, executionId.value)
-      ElMessage.success('已触发重试')
-      await loadExecution()
-      connectSSE()
-    } catch (e) {
-      if (e !== 'cancel') ElMessage.error('重试失败')
-    }
-  }
-}
-
 async function handleRetryStage(stageId: number) {
   try {
     await retryStageApi(workflowId.value, executionId.value, stageId)
@@ -395,23 +411,29 @@ function getStageIcon(status: string) {
   return map[status] || 'mdi:circle-outline'
 }
 
-function getTaskIcon(status: string) {
+function getTaskIcon(status: string, changed?: boolean) {
+  if (status === 'success' && changed === false) return 'mdi:check-circle-outline'
   const map: Record<string, string> = {
     running: 'mdi:loading',
-    success: 'mdi:check',
-    failed: 'mdi:close',
-    pending: 'mdi:circle-outline',
+    success: 'mdi:check-circle',
+    failed: 'mdi:close-circle',
+    pending: 'mdi:clock-outline',
+    skipped: 'mdi:skip-next',
   }
   return map[status] || 'mdi:circle-outline'
+}
+
+function getTaskClass(status: string, changed?: boolean) {
+  if (status === 'success' && changed === false) return 'subtask-unchanged'
+  return `subtask-${status}`
 }
 
 onMounted(() => {
   loadExecution().then(() => {
     if (isRunning.value) {
       connectSSE()
-    } else {
-      startAutoRefresh()
     }
+    // 不再自动刷新 - 只在 SSE 连接时实时更新
   })
 })
 
@@ -562,7 +584,8 @@ onUnmounted(() => {
 }
 
 .task-output,
-.task-error {
+.task-error,
+.task-trace {
   margin-top: 8px;
   padding: 8px;
   border-radius: 4px;
@@ -579,8 +602,15 @@ onUnmounted(() => {
   color: var(--el-color-danger);
 }
 
+.task-trace {
+  background: rgba(230, 162, 60, 0.06);
+  color: var(--el-color-warning);
+  font-size: 11px;
+}
+
 .task-output pre,
-.task-error pre {
+.task-error pre,
+.task-trace pre {
   margin: 0;
   white-space: pre-wrap;
   word-break: break-all;
@@ -619,6 +649,53 @@ onUnmounted(() => {
 
 .subtask-item:last-child {
   border-bottom: none;
+}
+
+.task-module {
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color-lighter);
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-left: 4px;
+}
+
+.subtask-machines {
+  margin-left: 24px;
+  margin-top: 4px;
+}
+
+.subtask-machine {
+  padding: 6px 8px;
+  border-left: 3px solid transparent;
+  margin-bottom: 4px;
+}
+
+.subtask-machine:last-child {
+  margin-bottom: 0;
+}
+
+.subtask-success {
+  border-left-color: var(--el-color-success);
+}
+
+.subtask-unchanged {
+  border-left-color: #e6a23c;
+}
+
+.subtask-failed {
+  border-left-color: var(--el-color-danger);
+}
+
+.subtask-running {
+  border-left-color: var(--el-color-warning);
+}
+
+.machine-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 4px;
 }
 
 .status-running {

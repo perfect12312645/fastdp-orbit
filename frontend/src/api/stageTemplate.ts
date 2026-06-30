@@ -68,3 +68,18 @@ export function executeStageTemplateApi(id: number, machineGroupId?: number): Pr
 export function getExecutionHistoryApi(stageId: number): Promise<any[]> {
   return request.get(`/stage-templates/${stageId}/executions`).then((res) => res.data.data)
 }
+
+/** 获取单阶段执行详情 */
+export function getStageExecutionApi(id: number): Promise<any> {
+  return request.get(`/stage-executions/${id}`).then((res) => res.data.data)
+}
+
+/** 取消单阶段执行 */
+export function cancelStageExecutionApi(id: number): Promise<void> {
+  return request.post(`/stage-executions/${id}/cancel`).then((res) => res.data)
+}
+
+/** 删除单阶段执行记录 */
+export function deleteStageExecutionApi(id: number): Promise<void> {
+  return request.delete(`/stage-executions/${id}`).then((res) => res.data)
+}

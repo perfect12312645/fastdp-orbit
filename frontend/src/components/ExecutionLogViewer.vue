@@ -50,14 +50,15 @@
           v-for="(task, index) in taskLogs"
           :key="task.taskId"
           class="log-task"
-          :class="getTaskClass(task.status)"
+          :class="getTaskClass(task.status, task.changed)"
         >
           <div class="log-task-header">
             <div class="log-task-status">
-              <Icon :icon="getTaskIcon(task.status)" :size="16" />
+              <Icon :icon="getTaskIcon(task.status, task.changed)" :size="16" :style="{ color: getTaskIconColor(task.status, task.changed) }" />
             </div>
             <div class="log-task-info">
-              <span class="log-task-name">{{ task.name || `任务 ${task.ref}` }}</span>
+              <span class="log-task-ref">任务-{{ task.ref }}</span>
+              <span class="log-task-name">{{ task.name || '未命名任务' }}</span>
               <span class="log-task-module">{{ task.module }}</span>
             </div>
             <div class="log-task-time" v-if="task.duration">
@@ -65,10 +66,11 @@
             </div>
           </div>
 
-          <!-- 任务输出 -->
-          <div class="log-task-output" v-if="task.output || task.error">
+          <!-- 任务输出（仅在没有机器数据时显示） -->
+          <div class="log-task-output" v-if="(task.output || task.error) && (!task.machines || task.machines.length === 0)">
             <pre v-if="task.output" class="log-output">{{ task.output }}</pre>
             <pre v-if="task.error" class="log-error">{{ task.error }}</pre>
+            <pre v-if="task.trace" class="log-trace">{{ task.trace }}</pre>
           </div>
 
           <!-- 机器执行详情 -->
@@ -77,16 +79,17 @@
               v-for="machine in task.machines"
               :key="machine.host"
               class="log-machine"
-              :class="getMachineClass(machine.status)"
+              :class="getMachineClass(machine.status, machine.changed)"
             >
               <div class="log-machine-header">
-                <Icon :icon="getTaskIcon(machine.status)" :size="14" />
+                <Icon :icon="getTaskIcon(machine.status, machine.changed)" :size="14" :style="{ color: getTaskIconColor(machine.status, machine.changed) }" />
                 <span class="log-machine-host">{{ machine.host }}</span>
                 <span class="log-machine-time" v-if="machine.duration">{{ machine.duration }}ms</span>
               </div>
               <div class="log-machine-output" v-if="machine.output || machine.error">
                 <pre v-if="machine.output" class="log-output">{{ machine.output }}</pre>
                 <pre v-if="machine.error" class="log-error">{{ machine.error }}</pre>
+                <pre v-if="machine.trace" class="log-trace">{{ machine.trace }}</pre>
               </div>
             </div>
           </div>
@@ -116,6 +119,9 @@ interface TaskLog {
   status: 'pending' | 'running' | 'success' | 'failed' | 'skipped'
   output?: string
   error?: string
+  trace?: string
+  errorCode?: number
+  changed?: boolean
   duration?: number
   machines?: MachineLog[]
 }
@@ -125,6 +131,9 @@ interface MachineLog {
   status: 'pending' | 'running' | 'success' | 'failed' | 'skipped'
   output?: string
   error?: string
+  trace?: string
+  errorCode?: number
+  changed?: boolean
   duration?: number
 }
 
@@ -192,7 +201,7 @@ function connectSSE(executionId?: number) {
   eventSource.addEventListener('connected', () => {
     console.log('[SSE] connected to execution', id)
     // 加载执行详情（处理快速完成的情况）
-    loadExecutionDetails(id)
+    loadStageExecutionDetails(id)
   })
 
   eventSource.addEventListener('execution_status', (e) => {
@@ -201,7 +210,7 @@ function connectSSE(executionId?: number) {
     if (data.status === 'success' || data.status === 'failed' || data.status === 'cancelled') {
       disconnectSSE()
       // 加载最终执行详情
-      loadExecutionDetails(id)
+      loadStageExecutionDetails(id)
     }
   })
 
@@ -212,9 +221,14 @@ function connectSSE(executionId?: number) {
 
   eventSource.addEventListener('task_status', (e) => {
     const data = JSON.parse(e.data)
-    updateTaskStatus(data.task_id, data.status, {
+    updateTaskStatus(data.ref || data.task_id, data.status, {
+      ref: data.ref,
+      taskName: data.task_name,
       output: data.output,
       error: data.error,
+      trace: data.trace,
+      errorCode: data.error_code,
+      changed: data.changed,
       duration: data.duration_ms,
       host: data.host,
     })
@@ -236,15 +250,14 @@ function disconnectSSE() {
   }
 }
 
-// 更新任务状态
-function updateTaskStatus(taskId: number, status: string, data?: any) {
-  let task = taskLogs.value.find(t => t.taskId === taskId)
+// 更新任务状态（用 ref 做 key，同一任务在不同机器上有不同 taskId）
+function updateTaskStatus(taskRef: number, status: string, data?: any) {
+  let task = taskLogs.value.find(t => t.ref === taskRef)
   if (!task) {
-    // 创建新任务条目
     task = {
-      taskId: taskId,
-      ref: 0,
-      name: `任务 ${taskId}`,
+      taskId: taskRef,
+      ref: data?.ref || taskRef,
+      name: data?.taskName || `任务 ${taskRef}`,
       module: '',
       status: status as any,
       machines: [],
@@ -252,10 +265,14 @@ function updateTaskStatus(taskId: number, status: string, data?: any) {
     taskLogs.value.push(task)
   }
   
+  // 更新任务级别状态（不设置 output，output 只在机器级别）
   task.status = status as any
   if (data) {
-    if (data.output) task.output = data.output
+    if (data.taskName) task.name = data.taskName
     if (data.error) task.error = data.error
+    if (data.trace) task.trace = data.trace
+    if (data.errorCode) task.errorCode = data.errorCode
+    if (data.changed !== undefined) task.changed = data.changed
     if (data.duration) task.duration = data.duration
     
     // 更新或创建机器级别条目
@@ -269,60 +286,94 @@ function updateTaskStatus(taskId: number, status: string, data?: any) {
       machine.status = status as any
       if (data.output) machine.output = data.output
       if (data.error) machine.error = data.error
+      if (data.trace) machine.trace = data.trace
+      if (data.errorCode) machine.errorCode = data.errorCode
+      if (data.changed !== undefined) machine.changed = data.changed
       if (data.duration) machine.duration = data.duration
     }
   }
   scrollToBottom()
 }
 
-// 加载执行详情（处理快速完成的情况）
-async function loadExecutionDetails(executionId: number) {
+// 加载单阶段执行详情（处理快速完成的情况）
+async function loadStageExecutionDetails(executionId: number) {
   try {
-    const { getExecutionApi } = await import('@/api/workflow')
-    // 需要一个 workflowId，但单阶段执行没有 workflowId
-    // 使用通用的执行详情 API
-    const response = await fetch(`/api/v1/executions/${executionId}`)
-    const result = await response.json()
-    if (result.code === 0 && result.data) {
-      const exec = result.data
-      executionStatus.value = exec.status
-      
-      // 加载任务执行详情
-      if (exec.stage_group_executions) {
-        for (const sge of exec.stage_group_executions) {
-          if (sge.stage_executions) {
-            for (const se of sge.stage_executions) {
-              if (se.task_executions) {
-                for (const te of se.task_executions) {
-                  const existingTask = taskLogs.value.find(t => t.taskId === te.task_id)
-                  if (!existingTask) {
-                    taskLogs.value.push({
-                      taskId: te.task_id,
-                      ref: te.task?.ref || 0,
-                      name: te.task?.name || '',
-                      module: te.task?.module || '',
-                      status: te.status,
-                      output: te.output,
-                      error: te.error,
-                      duration: te.duration_ms,
-                      machines: [{
-                        host: te.host,
-                        status: te.status,
-                        output: te.output,
-                        error: te.error,
-                        duration: te.duration_ms,
-                      }]
-                    })
-                  }
-                }
-              }
-            }
+    const { getStageExecutionApi } = await import('@/api/stageTemplate')
+    const exec = await getStageExecutionApi(executionId)
+    if (!exec) return
+
+    executionStatus.value = exec.status
+    
+    // 按 task_ref 分组收集任务执行记录
+    const taskMap = new Map<number, any>()
+    
+    if (exec.task_executions) {
+      for (const te of exec.task_executions) {
+        const taskRef = te.task_ref
+        if (!taskMap.has(taskRef)) {
+          taskMap.set(taskRef, {
+            taskId: te.task_id || taskRef,
+            ref: taskRef,
+            name: te.task_name || '',
+            module: te.task_module || '',
+            status: te.status,
+            output: '',
+            error: '',
+            duration: 0,
+            changed: te.changed,
+            machines: []
+          })
+        }
+        const task = taskMap.get(taskRef)!
+        // 添加机器执行记录
+        task.machines.push({
+          host: te.host,
+          status: te.status,
+          output: te.output,
+          error: te.error,
+          trace: te.trace,
+          errorCode: te.error_code,
+          changed: te.changed,
+          duration: te.duration_ms,
+        })
+        // 更新任务状态
+        if (te.status === 'failed') {
+          task.status = 'failed'
+          task.error = te.error
+          task.trace = te.trace
+        } else if (te.status === 'success' && task.status !== 'failed') {
+          task.status = 'success'
+          task.changed = task.changed || te.changed
+        }
+        task.duration = Math.max(task.duration, te.duration_ms || 0)
+      }
+    }
+    
+    // 更新任务日志（合并已有数据）
+    for (const [taskRef, task] of taskMap) {
+      const existing = taskLogs.value.find(t => t.ref === taskRef)
+      if (existing) {
+        existing.status = task.status
+        existing.changed = task.changed
+        existing.duration = task.duration
+        if (task.error) existing.error = task.error
+        if (task.trace) existing.trace = task.trace
+        // 合并机器记录
+        for (const machine of task.machines) {
+          const existingMachine = existing.machines?.find(m => m.host === machine.host)
+          if (existingMachine) {
+            Object.assign(existingMachine, machine)
+          } else {
+            if (!existing.machines) existing.machines = []
+            existing.machines.push(machine)
           }
         }
+      } else {
+        taskLogs.value.push(task)
       }
     }
   } catch (error) {
-    console.error('Failed to load execution details:', error)
+    console.error('Failed to load stage execution details:', error)
   }
 }
 
@@ -358,15 +409,18 @@ function getStatusLabel(status: string) {
   return map[status] || status
 }
 
-function getTaskClass(status: string) {
+function getTaskClass(status: string, changed?: boolean) {
+  if (status === 'success' && changed === false) return 'log-task--unchanged'
   return `log-task--${status}`
 }
 
-function getMachineClass(status: string) {
+function getMachineClass(status: string, changed?: boolean) {
+  if (status === 'success' && changed === false) return 'log-machine--unchanged'
   return `log-machine--${status}`
 }
 
-function getTaskIcon(status: string) {
+function getTaskIcon(status: string, changed?: boolean) {
+  if (status === 'success' && changed === false) return 'mdi:check-circle-outline'
   const map: Record<string, string> = {
     running: 'mdi:loading',
     success: 'mdi:check-circle',
@@ -375,6 +429,19 @@ function getTaskIcon(status: string) {
     skipped: 'mdi:skip-next',
   }
   return map[status] || 'mdi:circle-outline'
+}
+
+// 获取图标颜色
+function getTaskIconColor(status: string, changed?: boolean): string {
+  if (status === 'success' && changed === false) return '#f5d76e' // 柔和黄
+  const map: Record<string, string> = {
+    running: '#e6a23c',
+    success: '#67c23a',
+    failed: '#f56c6c',
+    pending: '#909399',
+    skipped: '#909399',
+  }
+  return map[status] || '#909399'
 }
 
 // 暴露方法
@@ -457,6 +524,10 @@ defineExpose({
   border-color: #f56c6c;
 }
 
+.log-task--unchanged {
+  border-color: #f5d76e;
+}
+
 .log-task-header {
   display: flex;
   align-items: center;
@@ -479,6 +550,15 @@ defineExpose({
 .log-task-name {
   font-weight: 500;
   color: rgba(255, 255, 255, 0.9);
+}
+
+.log-task-ref {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.1);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 500;
 }
 
 .log-task-module {
@@ -527,6 +607,10 @@ defineExpose({
   background: rgba(245, 108, 108, 0.1);
 }
 
+.log-machine--unchanged .log-machine-header {
+  background: rgba(245, 215, 110, 0.15);
+}
+
 .log-machine-host {
   font-size: 12px;
   color: rgba(255, 255, 255, 0.7);
@@ -554,6 +638,15 @@ defineExpose({
   color: #f56c6c;
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+.log-trace {
+  margin: 0;
+  color: #e6a23c;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-size: 12px;
+  opacity: 0.8;
 }
 
 .log-empty {

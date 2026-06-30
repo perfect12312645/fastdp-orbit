@@ -2,8 +2,9 @@ package commands
 
 import (
 	"fmt"
-	"github.com/spf13/cobra"
 	"os"
+
+	"github.com/spf13/cobra"
 )
 
 var rootCmd = &cobra.Command{
@@ -26,7 +27,6 @@ func init() {
 
 	// Add subcommands
 	rootCmd.AddCommand(machineCmd)
-	rootCmd.AddCommand(clusterCmd)
 	rootCmd.AddCommand(workflowCmd)
 	rootCmd.AddCommand(versionCmd)
 }

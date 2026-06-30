@@ -534,7 +534,7 @@
                       <el-col :span="8">
                         <el-form-item label="后置钩子" class="task-field">
                           <el-select
-                            v-model="task.hook_ids_array"
+                            v-model="task.hooks_array"
                             multiple
                             placeholder="选择钩子模板"
                             style="width: 100%"
@@ -792,6 +792,12 @@
             </template>
           </el-table-column>
           <el-table-column label="触发方式" width="100" prop="trigger" />
+          <el-table-column label="错误" min-width="150" show-overflow-tooltip>
+            <template #default="{ row }">
+              <span v-if="row.error" style="color: var(--el-color-danger);">{{ row.error }}</span>
+              <span v-else style="color: var(--el-text-color-secondary);">-</span>
+            </template>
+          </el-table-column>
           <el-table-column label="开始时间" width="170">
             <template #default="{ row }">
               {{ formatDateTime(row.started_at) }}
@@ -802,13 +808,7 @@
               {{ row.finished_at ? formatDateTime(row.finished_at) : '-' }}
             </template>
           </el-table-column>
-          <el-table-column label="错误" min-width="150" show-overflow-tooltip>
-            <template #default="{ row }">
-              <span v-if="row.error" style="color: var(--el-color-danger);">{{ row.error }}</span>
-              <span v-else style="color: var(--el-text-color-secondary);">-</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="160" fixed="right">
+          <el-table-column label="操作" width="200" fixed="right">
             <template #default="{ row }">
               <el-button type="primary" link size="small" @click="viewExecutionLog(row.id)">
                 <Icon icon="mdi:console" :size="14" /> 日志
@@ -821,6 +821,15 @@
                 @click="cancelExecution(row.id)"
               >
                 <Icon icon="mdi:stop" :size="14" /> 终止
+              </el-button>
+              <el-button
+                v-if="row.status !== 'running'"
+                type="danger"
+                link
+                size="small"
+                @click="deleteExecutionRecord(row.id)"
+              >
+                <Icon icon="mdi:delete-outline" :size="14" />
               </el-button>
             </template>
           </el-table-column>
@@ -893,8 +902,8 @@ interface StageTask {
   retries: number
   delay: number
   when: string
-  hook_ids: string
-  hook_ids_array: string[]
+  hooks: string
+  hooks_array: string[]
   register: string
   ignore_errors: boolean
   loop: string
@@ -1091,8 +1100,8 @@ async function cancelExecution(executionId: number) {
       cancelButtonText: '取消',
       type: 'warning',
     })
-    const { cancelExecutionApi } = await import('@/api/workflow')
-    await cancelExecutionApi(0, executionId)
+    const { cancelStageExecutionApi } = await import('@/api/stageTemplate')
+    await cancelStageExecutionApi(executionId)
     ElMessage.success('已发送终止请求')
     // 刷新执行记录
     if (executionHistoryStage.value) {
@@ -1100,6 +1109,25 @@ async function cancelExecution(executionId: number) {
     }
   } catch (e: any) {
     if (e !== 'cancel') ElMessage.error(e?.message || '终止失败')
+  }
+}
+
+async function deleteExecutionRecord(executionId: number) {
+  try {
+    await ElMessageBox.confirm('确认删除该执行记录？', '删除确认', {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+    const { deleteStageExecutionApi } = await import('@/api/stageTemplate')
+    await deleteStageExecutionApi(executionId)
+    ElMessage.success('删除成功')
+    // 刷新执行记录
+    if (executionHistoryStage.value) {
+      showExecutionHistory(executionHistoryStage.value)
+    }
+  } catch (e: any) {
+    if (e !== 'cancel') ElMessage.error(e?.message || '删除失败')
   }
 }
 
@@ -1271,14 +1299,14 @@ function normalizeTasks(rawTasks: any[]): StageTask[] {
       params = { command: '' }
     }
 
-    // 解析 hook_ids JSON 数组 -> hook_ids_array（名称列表）
-    let hook_ids_array: string[] = []
-    if (t.hook_ids) {
+    // 解析 hooks JSON 数组 -> hooks_array（名称列表）
+    let hooks_array: string[] = []
+    if (t.hooks) {
       try {
-        const parsed = JSON.parse(t.hook_ids)
-        if (Array.isArray(parsed)) hook_ids_array = parsed.map(String)
+        const parsed = JSON.parse(t.hooks)
+        if (Array.isArray(parsed)) hooks_array = parsed.map(String)
       } catch {
-        hook_ids_array = []
+        hooks_array = []
       }
     }
 
@@ -1314,7 +1342,7 @@ function normalizeTasks(rawTasks: any[]): StageTask[] {
       ...t,
       params,
       order: t.order || i + 1,
-      hook_ids_array,
+      hooks_array,
       loop_array,
       loop_mode,
       loop_keys,
@@ -1433,8 +1461,8 @@ function addTask() {
     retries: 0,
     delay: 0,
     when: '',
-    hook_ids: '',
-    hook_ids_array: [],
+    hooks: '',
+    hooks_array: [],
     register: '',
     ignore_errors: false,
     loop: '',
@@ -1510,7 +1538,7 @@ function formToYaml() {
       if (t.delay) task.delay = t.delay
       if (t.params) task.params = t.params
       if (t.when) task.when = t.when
-      if (t.hook_ids) task.hook_ids = t.hook_ids
+      if (t.hooks) task.hooks = t.hooks
       if (t.loop) task.loop = t.loop
       if (t.register) task.register = t.register
       if (t.ignore_errors) task.ignore_errors = t.ignore_errors
@@ -1568,13 +1596,13 @@ watch(editMode, (mode) => {
   }
 })
 
-// 同步 hook_ids_array <-> hook_ids, loop_array/loop_rows <-> loop
+// 同步 hooks_array <-> hooks, loop_array/loop_rows <-> loop
 watch(() => formData.value.tasks, (tasks) => {
   for (const task of tasks) {
-    if (task.hook_ids_array && task.hook_ids_array.length > 0) {
-      task.hook_ids = JSON.stringify(task.hook_ids_array)
+    if (task.hooks_array && task.hooks_array.length > 0) {
+      task.hooks = JSON.stringify(task.hooks_array)
     } else {
-      task.hook_ids = ''
+      task.hooks = ''
     }
     if (task.loop_mode === 'object') {
       if (Array.isArray(task.loop_array)) task.loop_array.splice(0)

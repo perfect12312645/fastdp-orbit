@@ -69,3 +69,8 @@ export function retryExecutionApi(workflowId: number, executionId: number): Prom
 export function retryStageApi(workflowId: number, executionId: number, stageId: number): Promise<void> {
   return request.post(`/workflows/${workflowId}/executions/${executionId}/stages/${stageId}/retry`).then((res) => res.data)
 }
+
+/** 删除执行记录 */
+export function deleteExecutionApi(workflowId: number, executionId: number): Promise<void> {
+  return request.delete(`/workflows/${workflowId}/executions/${executionId}`).then((res) => res.data)
+}

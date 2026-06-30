@@ -58,7 +58,7 @@ type CreateTaskInput struct {
 	Params       string `json:"params"`
 	Order        int    `json:"order"`
 	When         string `json:"when"`
-	HookIDs      string `json:"hook_ids"`
+	Hooks      string `json:"hooks"`
 	Loop         string `json:"loop"`
 	Timeout      int    `json:"timeout"`
 	IgnoreErrors bool   `json:"ignore_errors"`
@@ -140,7 +140,7 @@ func CreateWorkflow(c *gin.Context) {
 					Params:       t.Params,
 					Order:        t.Order,
 					When:         t.When,
-					HookIDs:      t.HookIDs,
+					Hooks:      t.Hooks,
 					Loop:         t.Loop,
 					Timeout:      t.Timeout,
 					IgnoreErrors: t.IgnoreErrors,
@@ -263,7 +263,7 @@ func UpdateWorkflow(c *gin.Context) {
 					Params:       t.Params,
 					Order:        t.Order,
 					When:         t.When,
-					HookIDs:      t.HookIDs,
+					Hooks:      t.Hooks,
 					Loop:         t.Loop,
 					Timeout:      t.Timeout,
 					IgnoreErrors: t.IgnoreErrors,
@@ -523,4 +523,25 @@ func GetExecution(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"code": 0, "message": "success", "data": exec})
+}
+
+// DeleteExecution 删除执行记录
+func DeleteExecution(c *gin.Context) {
+	if WorkflowService == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "message": "服务未初始化"})
+		return
+	}
+
+	execID, err := strconv.ParseUint(c.Param("eid"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "message": "ID格式错误"})
+		return
+	}
+
+	if err := WorkflowService.DeleteExecution(uint(execID)); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "message": "删除失败: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"code": 0, "message": "success"})
 }

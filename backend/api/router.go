@@ -70,6 +70,7 @@ func SetupRouter(cfg *config.ServerConfig, mc *cache.MachineCache, pool *serverg
 			workflows.POST("/:id/execute", views.ExecuteWorkflow)
 			workflows.GET("/:id/executions", views.ListExecutions)
 			workflows.GET("/:id/executions/:eid", views.GetExecution)
+			workflows.DELETE("/:id/executions/:eid", views.DeleteExecution)
 
 			// 执行控制
 			workflows.POST("/:id/executions/:eid/pause", views.PauseWorkflow)
@@ -95,8 +96,16 @@ func SetupRouter(cfg *config.ServerConfig, mc *cache.MachineCache, pool *serverg
 			// 单阶段执行
 			stageTemplates.POST("/:id/execute", views.ExecuteSingleStage)
 
-			// 执行历史
+			// 阶段执行历史
 			stageTemplates.GET("/:id/executions", views.ListStageExecutions)
+		}
+
+		// 单阶段执行记录管理
+		stageExecutions := api.Group("/stage-executions")
+		{
+			stageExecutions.GET("/:id", views.GetStageExecution)
+			stageExecutions.DELETE("/:id", views.DeleteStageExecution)
+			stageExecutions.POST("/:id/cancel", views.CancelStageExecution)
 		}
 
 		// Global Variables（全局变量管理）
@@ -136,9 +145,11 @@ func SetupRouter(cfg *config.ServerConfig, mc *cache.MachineCache, pool *serverg
 			solutionLibraries.GET("", views.ListSolutionLibrarys)
 			solutionLibraries.POST("", views.CreateSolutionLibrary)
 			solutionLibraries.GET("/:id", views.GetSolutionLibrary)
+			solutionLibraries.PUT("/:id", views.UpdateSolutionLibrary)
 			solutionLibraries.DELETE("/:id", views.DeleteSolutionLibrary)
 			solutionLibraries.GET("/:id/export", views.ExportSolutionLibrary)
 			solutionLibraries.POST("/import", views.ImportSolutionLibrary)
+			solutionLibraries.POST("/:id/apply", views.ApplySolutionLibrary)
 		}
 
 		// Storage（文件存储管理）

@@ -40,7 +40,7 @@ export interface WorkflowTask {
   params: string
   order: number
   when: string
-  hook_ids: string
+  hooks: string
   loop: string
   loop_mode?: 'simple' | 'object'
   loop_keys?: string[]
@@ -110,6 +110,8 @@ export interface WorkflowTaskExecution {
   output: string
   stderr: string
   error: string
+  trace: string
+  error_code: number
   changed: boolean
   hook_status: string
   hook_error: string
@@ -138,7 +140,7 @@ export interface CreateWorkflowRequest {
         params: string
         order: number
         when: string
-        hook_ids: string
+        hooks: string
         loop: string
         loop_mode?: 'simple' | 'object'
         loop_keys?: string[]

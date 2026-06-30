@@ -227,6 +227,31 @@ func (s *Service) ListExecutions(workflowID uint) ([]workflow.WorkflowExecution,
 	return execs, nil
 }
 
+// DeleteExecution 删除执行记录（级联删除关联的 stage/task 记录）
+func (s *Service) DeleteExecution(executionID uint) error {
+	var exec workflow.WorkflowExecution
+	if err := s.db.First(&exec, executionID).Error; err != nil {
+		return fmt.Errorf("执行记录不存在")
+	}
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		// 删除 task_executions
+		var stageExecIDs []uint
+		tx.Model(&workflow.WorkflowStageExecution{}).
+			Where("stage_group_execution_id IN (SELECT id FROM workflow_stage_group_executions WHERE execution_id = ?)", executionID).
+			Pluck("id", &stageExecIDs)
+		if len(stageExecIDs) > 0 {
+			tx.Where("stage_execution_id IN ?", stageExecIDs).Delete(&workflow.WorkflowTaskExecution{})
+		}
+		// 删除 stage_executions
+		tx.Where("stage_group_execution_id IN (SELECT id FROM workflow_stage_group_executions WHERE execution_id = ?)", executionID).
+			Delete(&workflow.WorkflowStageExecution{})
+		// 删除 stage_group_executions
+		tx.Where("execution_id = ?", executionID).Delete(&workflow.WorkflowStageGroupExecution{})
+		// 删除 execution
+		return tx.Delete(&exec).Error
+	})
+}
+
 // GetExecution 获取执行详情（含各 group/stage/task 状态）
 func (s *Service) GetExecution(executionID uint) (*workflow.WorkflowExecution, error) {
 	var exec workflow.WorkflowExecution

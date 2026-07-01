@@ -62,11 +62,22 @@
     <!-- 全屏编辑对话框 -->
     <el-dialog
       v-model="dialogVisible"
-      :title="editingId ? '编辑模板' : '创建模板'"
       fullscreen
       destroy-on-close
       class="template-editor-dialog"
     >
+      <template #header>
+        <div class="template-editor-header">
+          <span>{{ editingId ? '编辑模板' : '创建模板' }}</span>
+          <div class="template-editor-header-actions">
+            <el-button @click="dialogVisible = false" size="small">取消</el-button>
+            <el-button type="primary" @click="handleSubmit" :loading="submitting" size="small">
+              {{ editingId ? '保存' : '创建' }}
+            </el-button>
+          </div>
+        </div>
+      </template>
+
       <div class="template-editor-layout">
         <!-- 左侧编辑区 -->
         <div class="template-editor-main">
@@ -210,13 +221,6 @@
           </div>
         </div>
       </div>
-
-      <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="handleSubmit" :loading="submitting">
-          {{ editingId ? '保存' : '创建' }}
-        </el-button>
-      </template>
     </el-dialog>
 
     <!-- 预览对话框 -->
@@ -586,8 +590,20 @@ onMounted(loadData)
 <style scoped>
 .template-editor-dialog :deep(.el-dialog__body) {
   padding: 0;
-  height: calc(100vh - 120px);
+  height: calc(100vh - 106px);
   overflow: hidden;
+}
+
+.template-editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.template-editor-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .template-editor-layout {

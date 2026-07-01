@@ -2,8 +2,6 @@ package workflow
 
 import (
 	"time"
-
-	"gorm.io/gorm"
 )
 
 // SolutionLibrary 方案库（模板市场的基本单位，包含多个模块的组合）
@@ -15,7 +13,9 @@ type SolutionLibrary struct {
 	Version     string `json:"version" gorm:"size:20"`
 	Author      string `json:"author" gorm:"size:100"`
 	Icon        string `json:"icon" gorm:"size:50"` // mdi icon name
-	// 关联ID（JSON数组格式存储）
+	// 原始数据（导入时存储 OrbitPack JSON，应用后清空）
+	PackData string `json:"pack_data" gorm:"type:text"` // OrbitPack JSON
+	// 关联ID（JSON数组格式存储，应用后才有值）
 	StageIDs    string `json:"stage_ids" gorm:"type:text"`    // [1,2,3]
 	VariableIDs string `json:"variable_ids" gorm:"type:text"` // [1,2]
 	HookIDs     string `json:"hook_ids" gorm:"type:text"`     // [1]
@@ -23,15 +23,14 @@ type SolutionLibrary struct {
 	FileIDs     string `json:"file_ids" gorm:"type:text"`     // [1]
 	WorkflowIDs string `json:"workflow_ids" gorm:"type:text"` // [1]
 	// 统计字段
-	StageCount    int            `json:"stage_count"`
-	VariableCount int            `json:"variable_count"`
-	HookCount     int            `json:"hook_count"`
-	TemplateCount int            `json:"template_count"`
-	FileCount     int            `json:"file_count"`
-	WorkflowCount int            `json:"workflow_count"`
-	CreatedAt     time.Time      `json:"created_at"`
-	UpdatedAt     time.Time      `json:"updated_at"`
-	DeletedAt     gorm.DeletedAt `json:"-" gorm:"index"`
+	StageCount    int       `json:"stage_count"`
+	VariableCount int       `json:"variable_count"`
+	HookCount     int       `json:"hook_count"`
+	TemplateCount int       `json:"template_count"`
+	FileCount     int       `json:"file_count"`
+	WorkflowCount int       `json:"workflow_count"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 func (SolutionLibrary) TableName() string { return "solution_library" }
@@ -51,8 +50,15 @@ type OrbitPack struct {
 	GlobalVariables   []PackGlobalVariable   `yaml:"global_variables,omitempty" json:"globalVariables,omitempty"`
 	Hooks             []PackHook             `yaml:"hooks,omitempty" json:"hooks,omitempty"`
 	WorkflowTemplates []PackWorkflowTemplate `yaml:"workflow_templates,omitempty" json:"workflowTemplates,omitempty"`
+	MachineGroups     []PackMachineGroup      `yaml:"machine_groups,omitempty" json:"machineGroups,omitempty"`
 	Stages            []PackStage            `yaml:"stages,omitempty" json:"stages,omitempty"`
 	Workflows         []PackWorkflow         `yaml:"workflows,omitempty" json:"workflows,omitempty"`
+}
+
+// PackMachineGroup 打包的机器分组
+type PackMachineGroup struct {
+	Name        string `yaml:"name" json:"name"`
+	Description string `yaml:"description,omitempty" json:"description,omitempty"`
 }
 
 // PackMaterial 物料清单

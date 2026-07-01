@@ -8,6 +8,7 @@ export interface SolutionLibrary {
   version: string
   author: string
   icon: string
+  pack_data: string        // OrbitPack JSON (非空=未应用, 空=已应用)
   stage_ids: string     // JSON string like "[1,2,3]"
   variable_ids: string
   hook_ids: string
@@ -38,9 +39,9 @@ export interface OrbitPack {
     name: string
     size: number
     md5: string
-    download_url?: string
+    downloadUrl?: string
   }>
-  global_variables?: Array<{
+  globalVariables?: Array<{
     key: string
     type: string
     value: string
@@ -57,7 +58,7 @@ export interface OrbitPack {
     retries?: number
     delay?: number
   }>
-  workflow_templates?: Array<{
+  workflowTemplates?: Array<{
     name: string
     description?: string
     content: string
@@ -65,7 +66,7 @@ export interface OrbitPack {
   stages?: Array<{
     name: string
     description?: string
-    machine_group?: string
+    machineGroup?: string
     tasks: Array<{
       ref: number
       name: string
@@ -73,7 +74,7 @@ export interface OrbitPack {
       order: number
       params?: string
       when?: string
-          hooks?: string
+      hooks?: string
       loop?: string
       timeout?: number
       ignore_errors?: boolean
@@ -82,10 +83,14 @@ export interface OrbitPack {
       register?: string
     }>
   }>
+  machineGroups?: Array<{
+    name: string
+    description?: string
+  }>
   workflows?: Array<{
     name: string
     description?: string
-    stage_groups?: Array<{
+    stageGroups?: Array<{
       name: string
       description?: string
       order: number
@@ -94,7 +99,7 @@ export interface OrbitPack {
         name: string
         description?: string
         order: number
-        machine_group?: string
+        machineGroup?: string
         tasks?: Array<{
           ref: number
           name: string
@@ -185,7 +190,14 @@ export function importSolutionLibraryApi(data: {
 // 应用方案（检测冲突 + 根据决策执行）
 export function applySolutionLibraryApi(
   id: number,
-  decisions?: Record<string, Record<string, string>>
+  decisions?: Record<string, Record<string, string>>,
+  variableValues?: Record<string, string>,
+  machineGroupMachines?: Record<string, number[]>
 ): Promise<ConflictResponse | void> {
-  return request.post(`/solution-libraries/${id}/apply`, { decisions }).then((res) => res.data.data)
+  return request.post(`/solution-libraries/${id}/apply`, { decisions, variable_values: variableValues, machine_group_machines: machineGroupMachines }).then((res) => res.data.data)
+}
+
+// 文件下载代理
+export function downloadFileAPI(url: string): Promise<Blob> {
+  return request.post('/solution-libraries/download-proxy', { url }, { responseType: 'blob' }).then((res) => res.data)
 }

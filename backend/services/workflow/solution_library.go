@@ -7,6 +7,8 @@ import (
 	"fastdp-orbit/backend/models/machine"
 	"fastdp-orbit/backend/models/storage"
 	"fastdp-orbit/backend/models/workflow"
+
+	"gorm.io/gorm"
 )
 
 // ==================== SolutionLibrary CRUD ====================
@@ -74,13 +76,23 @@ func (s *Service) DeleteSolutionLibrary(id uint) error {
 	return s.db.Delete(&solution).Error
 }
 
-// ExportSolutionLibrary 导出方案为 orbit-pack YAML（根据存储的ID查询数据）
+// ExportSolutionLibrary 导出方案为 orbit-pack YAML
 func (s *Service) ExportSolutionLibrary(id uint) (*workflow.OrbitPack, error) {
 	var solution workflow.SolutionLibrary
 	if err := s.db.First(&solution, id).Error; err != nil {
 		return nil, fmt.Errorf("方案不存在")
 	}
 
+	// 如果方案未应用（有 pack_data），直接解析返回原始数据
+	if solution.PackData != "" {
+		var pack workflow.OrbitPack
+		if err := json.Unmarshal([]byte(solution.PackData), &pack); err != nil {
+			return nil, fmt.Errorf("解析方案数据失败: %v", err)
+		}
+		return &pack, nil
+	}
+
+	// 已应用的方案，根据存储的ID查询数据导出
 	pack := &workflow.OrbitPack{
 		APIVersion: "orbit/v1",
 		Kind:       "SolutionLibrary",
@@ -244,10 +256,35 @@ func (s *Service) ExportSolutionLibrary(id uint) (*workflow.OrbitPack, error) {
 		}
 	}
 
+	// 收集所有引用的机器分组名称（包含阶段模板和工作流阶段中的分组）
+	machineGroupNames := make(map[string]bool)
+	for _, st := range pack.Stages {
+		if st.MachineGroup != "" {
+			machineGroupNames[st.MachineGroup] = true
+		}
+	}
+	for _, pw := range pack.Workflows {
+		for _, psg := range pw.StageGroups {
+			for _, pws := range psg.Stages {
+				if pws.MachineGroup != "" {
+					machineGroupNames[pws.MachineGroup] = true
+				}
+			}
+		}
+	}
+	for name := range machineGroupNames {
+		pmg := workflow.PackMachineGroup{Name: name}
+		var mg machine.MachineGroup
+		if err := s.db.Where("name = ?", name).First(&mg).Error; err == nil {
+			pmg.Description = mg.Description
+		}
+		pack.MachineGroups = append(pack.MachineGroups, pmg)
+	}
+
 	return pack, nil
 }
 
-// ImportSolutionLibrary 导入 orbit-pack YAML 为方案（创建新记录，存储关联ID）
+// ImportSolutionLibrary 导入 orbit-pack YAML 为方案（只存储原始数据，不创建关联记录）
 func (s *Service) ImportSolutionLibrary(pack *workflow.OrbitPack) (*workflow.SolutionLibrary, error) {
 	if pack.Metadata.Name == "" {
 		return nil, fmt.Errorf("方案名称不能为空")
@@ -260,187 +297,27 @@ func (s *Service) ImportSolutionLibrary(pack *workflow.OrbitPack) (*workflow.Sol
 		return nil, fmt.Errorf("方案名称「%s」已存在", pack.Metadata.Name)
 	}
 
-	// 创建方案记录
+	// 序列化 pack 为 JSON
+	packJSON, err := json.Marshal(pack)
+	if err != nil {
+		return nil, fmt.Errorf("序列化方案数据失败: %v", err)
+	}
+
+	// 创建方案记录，只存储元数据和原始 pack 数据
 	solution := &workflow.SolutionLibrary{
 		Name:        pack.Metadata.Name,
 		Description: pack.Metadata.Description,
 		Category:    pack.Metadata.Category,
 		Version:     pack.Metadata.Version,
 		Author:      pack.Metadata.Author,
+		PackData:    string(packJSON),
+		// 统计字段从 pack 中计算
+		StageCount:    len(pack.Stages),
+		VariableCount: len(pack.GlobalVariables),
+		HookCount:     len(pack.Hooks),
+		TemplateCount: len(pack.WorkflowTemplates),
+		WorkflowCount: len(pack.Workflows),
 	}
-
-	// 导入全局变量并收集ID
-	var variableIDs []uint
-	for _, v := range pack.GlobalVariables {
-		gv := workflow.GlobalVariable{
-			Key: v.Key, Type: v.Type, Value: v.Value,
-			Description: v.Description, Group: v.Group,
-			Source: pack.Metadata.Name,
-		}
-		s.db.Create(&gv)
-		variableIDs = append(variableIDs, gv.ID)
-	}
-
-	// 导入钩子模板并收集ID，同时建立名称->ID映射
-	var hookIDs []uint
-	hookNameToID := make(map[string]uint)
-	for _, h := range pack.Hooks {
-		ht := workflow.HookTemplate{
-			Name: h.Name, Description: h.Description, Module: h.Module,
-			Params: h.Params, Timeout: h.Timeout, IgnoreErrors: h.IgnoreErrors,
-			Retries: h.Retries, Delay: h.Delay,
-			Source: pack.Metadata.Name,
-		}
-		s.db.Create(&ht)
-		hookIDs = append(hookIDs, ht.ID)
-		hookNameToID[h.Name] = ht.ID
-	}
-
-	// 导入模板文件并收集ID
-	var templateIDs []uint
-	for _, t := range pack.WorkflowTemplates {
-		wt := workflow.WorkflowTemplate{
-			Name: t.Name, Description: t.Description, Content: t.Content,
-			Source: pack.Metadata.Name,
-		}
-		s.db.Create(&wt)
-		templateIDs = append(templateIDs, wt.ID)
-	}
-
-	// 导入阶段模板并收集ID
-	var stageIDs []uint
-	for _, st := range pack.Stages {
-		var machineGroupID uint
-		if st.MachineGroup != "" {
-			var mg machine.MachineGroup
-			if err := s.db.Where("name = ?", st.MachineGroup).First(&mg).Error; err == nil {
-				machineGroupID = mg.ID
-			}
-		}
-		var tasks []workflow.StageTask
-		for _, t := range st.Tasks {
-			// hooks 字段直接存储钩子名称 JSON 数组
-			var hooksJSON string
-			if len(t.Hooks) > 0 {
-				b, _ := json.Marshal(t.Hooks)
-				hooksJSON = string(b)
-			}
-			tasks = append(tasks, workflow.StageTask{
-				Ref: t.Ref, Name: t.Name, Module: t.Module, Order: t.Order,
-				Params: t.Params, When: t.When, Hooks: hooksJSON,
-				Loop: t.Loop, Timeout: t.Timeout, IgnoreErrors: t.IgnoreErrors,
-				Retries: t.Retries, Delay: t.Delay, Register: t.Register,
-			})
-		}
-		tasksJSON, _ := json.Marshal(tasks)
-		stage := workflow.StageTemplate{
-			Name:           st.Name,
-			Description:    st.Description,
-			MachineGroupID: machineGroupID,
-			Tasks:          string(tasksJSON),
-			Version:        "imported",
-			Source:         pack.Metadata.Name,
-		}
-		s.db.Create(&stage)
-		stageIDs = append(stageIDs, stage.ID)
-	}
-
-	// 导入工作流并收集ID
-	var workflowIDs []uint
-	for _, pw := range pack.Workflows {
-		// 创建工作流记录
-		wf := workflow.Workflow{
-			Name:        pw.Name,
-			Description: pw.Description,
-			CreatedBy:   "import",
-		}
-		s.db.Create(&wf)
-
-		// 导入工作流钩子
-		for _, ph := range pw.Hooks {
-			wh := workflow.WorkflowHook{
-				WorkflowID:   wf.ID,
-				Name:         ph.Name,
-				Module:       ph.Module,
-				Params:       ph.Params,
-				Timeout:      ph.Timeout,
-				IgnoreErrors: ph.IgnoreErrors,
-				Retries:      ph.Retries,
-				Delay:        ph.Delay,
-			}
-			s.db.Create(&wh)
-		}
-
-		// 导入阶段组
-		for _, psg := range pw.StageGroups {
-			sg := workflow.WorkflowStageGroup{
-				WorkflowID:  wf.ID,
-				Name:        psg.Name,
-				Description: psg.Description,
-				Order:       psg.Order,
-				Mode:        psg.Mode,
-			}
-			s.db.Create(&sg)
-
-			// 导入阶段
-			for _, pws := range psg.Stages {
-				// 解析机器分组ID
-				var machineGroupID uint
-				if pws.MachineGroup != "" {
-					var mg machine.MachineGroup
-					if err := s.db.Where("name = ?", pws.MachineGroup).First(&mg).Error; err == nil {
-						machineGroupID = mg.ID
-					}
-				}
-				st := workflow.WorkflowStage{
-					StageGroupID:   sg.ID,
-					Name:           pws.Name,
-					Description:    pws.Description,
-					Order:          pws.Order,
-					MachineGroupID: machineGroupID,
-				}
-				s.db.Create(&st)
-
-				// 导入任务
-				for _, pwt := range pws.Tasks {
-					// hooks 字段直接存储钩子名称 JSON 数组
-					var hooksJSON string
-					if len(pwt.Hooks) > 0 {
-						b, _ := json.Marshal(pwt.Hooks)
-						hooksJSON = string(b)
-					}
-					task := workflow.WorkflowTask{
-						StageID:      st.ID,
-						Ref:          pwt.Ref,
-						Name:         pwt.Name,
-						Module:       pwt.Module,
-						Params:       pwt.Params,
-						Order:        pwt.Order,
-						When:         pwt.When,
-						Hooks:        hooksJSON,
-						Loop:         pwt.Loop,
-						Timeout:      pwt.Timeout,
-						IgnoreErrors: pwt.IgnoreErrors,
-						Retries:      pwt.Retries,
-						Delay:        pwt.Delay,
-						Register:     pwt.Register,
-					}
-					s.db.Create(&task)
-				}
-			}
-		}
-		workflowIDs = append(workflowIDs, wf.ID)
-	}
-
-	// 存储关联ID
-	solution.StageIDs = toJSON(stageIDs)
-	solution.VariableIDs = toJSON(variableIDs)
-	solution.HookIDs = toJSON(hookIDs)
-	solution.TemplateIDs = toJSON(templateIDs)
-	solution.WorkflowIDs = toJSON(workflowIDs)
-
-	// 更新统计
-	s.updateCounts(solution)
 
 	// 保存方案记录
 	if err := s.db.Create(solution).Error; err != nil {
@@ -500,225 +377,410 @@ type ImportSummary struct {
 	WorkflowCount int `json:"workflow_count"`
 }
 
-// CheckApplyConflicts 检测方案应用时的冲突
+// CheckApplyConflicts 检测方案应用时的冲突（基于 pack_data）
 func (s *Service) CheckApplyConflicts(solutionID uint) ([]ConflictItem, ImportSummary, error) {
 	var solution workflow.SolutionLibrary
 	if err := s.db.First(&solution, solutionID).Error; err != nil {
 		return nil, ImportSummary{}, fmt.Errorf("方案不存在")
 	}
 
+	if solution.PackData == "" {
+		return nil, ImportSummary{}, fmt.Errorf("方案未包含导入数据，请重新导入")
+	}
+
+	var pack workflow.OrbitPack
+	if err := json.Unmarshal([]byte(solution.PackData), &pack); err != nil {
+		return nil, ImportSummary{}, fmt.Errorf("解析方案数据失败: %v", err)
+	}
+
 	var conflicts []ConflictItem
 	summary := ImportSummary{}
 
 	// 检测阶段模板冲突
-	stageIDs := parseIDs(solution.StageIDs)
-	summary.StageCount = len(stageIDs)
-	if len(stageIDs) > 0 {
-		var stages []workflow.StageTemplate
-		s.db.Where("id IN ?", stageIDs).Find(&stages)
-		for _, st := range stages {
-			var count int64
-			s.db.Model(&workflow.StageTemplate{}).Where("name = ? AND id NOT IN ?", st.Name, stageIDs).Count(&count)
-			if count > 0 {
-				var existing workflow.StageTemplate
-				s.db.Where("name = ? AND id NOT IN ?", st.Name, stageIDs).First(&existing)
-				conflicts = append(conflicts, ConflictItem{
-					Type: "stages", Name: st.Name, ExistingSource: existing.Source,
-				})
-			}
+	summary.StageCount = len(pack.Stages)
+	for _, st := range pack.Stages {
+		var count int64
+		s.db.Model(&workflow.StageTemplate{}).Where("name = ?", st.Name).Count(&count)
+		if count > 0 {
+			var existing workflow.StageTemplate
+			s.db.Where("name = ?", st.Name).First(&existing)
+			conflicts = append(conflicts, ConflictItem{
+				Type: "stages", Name: st.Name, ExistingSource: existing.Source,
+			})
 		}
 	}
 
 	// 检测全局变量冲突
-	variableIDs := parseIDs(solution.VariableIDs)
-	summary.VariableCount = len(variableIDs)
-	if len(variableIDs) > 0 {
-		var vars []workflow.GlobalVariable
-		s.db.Where("id IN ?", variableIDs).Find(&vars)
-		for _, v := range vars {
-			var count int64
-			s.db.Model(&workflow.GlobalVariable{}).Where("`key` = ? AND id NOT IN ?", v.Key, variableIDs).Count(&count)
-			if count > 0 {
-				var existing workflow.GlobalVariable
-				s.db.Where("`key` = ? AND id NOT IN ?", v.Key, variableIDs).First(&existing)
-				conflicts = append(conflicts, ConflictItem{
-					Type: "variables", Name: v.Key, ExistingSource: existing.Source,
-				})
-			}
+	summary.VariableCount = len(pack.GlobalVariables)
+	for _, v := range pack.GlobalVariables {
+		var count int64
+		s.db.Model(&workflow.GlobalVariable{}).Where("`key` = ?", v.Key).Count(&count)
+		if count > 0 {
+			var existing workflow.GlobalVariable
+			s.db.Where("`key` = ?", v.Key).First(&existing)
+			conflicts = append(conflicts, ConflictItem{
+				Type: "variables", Name: v.Key, ExistingSource: existing.Source,
+			})
 		}
 	}
 
 	// 检测钩子模板冲突
-	hookIDs := parseIDs(solution.HookIDs)
-	summary.HookCount = len(hookIDs)
-	if len(hookIDs) > 0 {
-		var hooks []workflow.HookTemplate
-		s.db.Where("id IN ?", hookIDs).Find(&hooks)
-		for _, h := range hooks {
-			var count int64
-			s.db.Model(&workflow.HookTemplate{}).Where("name = ? AND id NOT IN ?", h.Name, hookIDs).Count(&count)
-			if count > 0 {
-				var existing workflow.HookTemplate
-				s.db.Where("name = ? AND id NOT IN ?", h.Name, hookIDs).First(&existing)
-				conflicts = append(conflicts, ConflictItem{
-					Type: "hooks", Name: h.Name, ExistingSource: existing.Source,
-				})
-			}
+	summary.HookCount = len(pack.Hooks)
+	for _, h := range pack.Hooks {
+		var count int64
+		s.db.Model(&workflow.HookTemplate{}).Where("name = ?", h.Name).Count(&count)
+		if count > 0 {
+			var existing workflow.HookTemplate
+			s.db.Where("name = ?", h.Name).First(&existing)
+			conflicts = append(conflicts, ConflictItem{
+				Type: "hooks", Name: h.Name, ExistingSource: existing.Source,
+			})
 		}
 	}
 
 	// 检测配置模板冲突
-	templateIDs := parseIDs(solution.TemplateIDs)
-	summary.TemplateCount = len(templateIDs)
-	if len(templateIDs) > 0 {
-		var templates []workflow.WorkflowTemplate
-		s.db.Where("id IN ?", templateIDs).Find(&templates)
-		for _, t := range templates {
-			var count int64
-			s.db.Model(&workflow.WorkflowTemplate{}).Where("name = ? AND id NOT IN ?", t.Name, templateIDs).Count(&count)
-			if count > 0 {
-				var existing workflow.WorkflowTemplate
-				s.db.Where("name = ? AND id NOT IN ?", t.Name, templateIDs).First(&existing)
-				conflicts = append(conflicts, ConflictItem{
-					Type: "templates", Name: t.Name, ExistingSource: existing.Source,
-				})
-			}
+	summary.TemplateCount = len(pack.WorkflowTemplates)
+	for _, t := range pack.WorkflowTemplates {
+		var count int64
+		s.db.Model(&workflow.WorkflowTemplate{}).Where("name = ?", t.Name).Count(&count)
+		if count > 0 {
+			var existing workflow.WorkflowTemplate
+			s.db.Where("name = ?", t.Name).First(&existing)
+			conflicts = append(conflicts, ConflictItem{
+				Type: "templates", Name: t.Name, ExistingSource: existing.Source,
+			})
 		}
 	}
 
 	// 检测工作流冲突
-	workflowIDs := parseIDs(solution.WorkflowIDs)
-	summary.WorkflowCount = len(workflowIDs)
-	if len(workflowIDs) > 0 {
-		var workflows []workflow.Workflow
-		s.db.Where("id IN ?", workflowIDs).Find(&workflows)
-		for _, wf := range workflows {
-			var count int64
-			s.db.Model(&workflow.Workflow{}).Where("name = ? AND id NOT IN ?", wf.Name, workflowIDs).Count(&count)
-			if count > 0 {
-				conflicts = append(conflicts, ConflictItem{
-					Type: "workflows", Name: wf.Name, ExistingSource: "系统",
-				})
-			}
+	summary.WorkflowCount = len(pack.Workflows)
+	for _, wf := range pack.Workflows {
+		var count int64
+		s.db.Model(&workflow.Workflow{}).Where("name = ?", wf.Name).Count(&count)
+		if count > 0 {
+			conflicts = append(conflicts, ConflictItem{
+				Type: "workflows", Name: wf.Name, ExistingSource: "系统",
+			})
 		}
 	}
 
 	return conflicts, summary, nil
 }
 
-// ApplySolutionLibraryWithDecisions 根据用户决策应用方案
-func (s *Service) ApplySolutionLibraryWithDecisions(solutionID uint, decisions map[string]map[string]string) error {
+// ApplySolutionLibraryWithDecisions 根据用户决策应用方案（从 pack_data 创建记录）
+func (s *Service) ApplySolutionLibraryWithDecisions(solutionID uint, decisions map[string]map[string]string, variableValues map[string]string, machineGroupMachines map[string][]uint) error {
 	var solution workflow.SolutionLibrary
 	if err := s.db.First(&solution, solutionID).Error; err != nil {
 		return fmt.Errorf("方案不存在")
 	}
 
-	// 处理阶段模板冲突
-	stageIDs := parseIDs(solution.StageIDs)
-	if len(stageIDs) > 0 {
-		var stages []workflow.StageTemplate
-		s.db.Where("id IN ?", stageIDs).Find(&stages)
-		for _, st := range stages {
-			if decisions["stages"] != nil && decisions["stages"][st.Name] == "skip" {
-				stageIDs = removeUint(stageIDs, st.ID)
-				continue
-			}
-			if decisions["stages"] != nil && decisions["stages"][st.Name] == "overwrite" {
-				s.db.Unscoped().Where("name = ? AND id NOT IN ?", st.Name, stageIDs).Delete(&workflow.StageTemplate{})
-			}
-		}
-		solution.StageIDs = toJSON(stageIDs)
+	if solution.PackData == "" {
+		return fmt.Errorf("方案未包含导入数据，请重新导入")
 	}
 
-	// 处理全局变量冲突
-	variableIDs := parseIDs(solution.VariableIDs)
-	if len(variableIDs) > 0 {
-		var vars []workflow.GlobalVariable
-		s.db.Where("id IN ?", variableIDs).Find(&vars)
-		for _, v := range vars {
-			if decisions["variables"] != nil && decisions["variables"][v.Key] == "skip" {
-				variableIDs = removeUint(variableIDs, v.ID)
-				continue
-			}
-			if decisions["variables"] != nil && decisions["variables"][v.Key] == "overwrite" {
-				s.db.Unscoped().Where("`key` = ? AND id NOT IN ?", v.Key, variableIDs).Delete(&workflow.GlobalVariable{})
-			}
-		}
-		solution.VariableIDs = toJSON(variableIDs)
+	var pack workflow.OrbitPack
+	if err := json.Unmarshal([]byte(solution.PackData), &pack); err != nil {
+		return fmt.Errorf("解析方案数据失败: %v", err)
 	}
 
-	// 处理钩子模板冲突
-	hookIDs := parseIDs(solution.HookIDs)
-	if len(hookIDs) > 0 {
-		var hooks []workflow.HookTemplate
-		s.db.Where("id IN ?", hookIDs).Find(&hooks)
-		for _, h := range hooks {
-			if decisions["hooks"] != nil && decisions["hooks"][h.Name] == "skip" {
-				hookIDs = removeUint(hookIDs, h.ID)
-				continue
+	// 先处理机器分组（创建/更新 + 关联机器），后续阶段和工作流按名称查找
+	if machineGroupMachines != nil {
+		for _, pmg := range pack.MachineGroups {
+			machineIDs := machineGroupMachines[pmg.Name]
+			var mg machine.MachineGroup
+			err := s.db.Where("name = ?", pmg.Name).First(&mg).Error
+			if err != nil {
+				// 不存在则创建
+				mg = machine.MachineGroup{
+					Name:        pmg.Name,
+					Description: pmg.Description,
+				}
+				s.db.Create(&mg)
 			}
-			if decisions["hooks"] != nil && decisions["hooks"][h.Name] == "overwrite" {
-				s.db.Unscoped().Where("name = ? AND id NOT IN ?", h.Name, hookIDs).Delete(&workflow.HookTemplate{})
-			}
-		}
-		solution.HookIDs = toJSON(hookIDs)
-	}
-
-	// 处理配置模板冲突
-	templateIDs := parseIDs(solution.TemplateIDs)
-	if len(templateIDs) > 0 {
-		var templates []workflow.WorkflowTemplate
-		s.db.Where("id IN ?", templateIDs).Find(&templates)
-		for _, t := range templates {
-			if decisions["templates"] != nil && decisions["templates"][t.Name] == "skip" {
-				templateIDs = removeUint(templateIDs, t.ID)
-				continue
-			}
-			if decisions["templates"] != nil && decisions["templates"][t.Name] == "overwrite" {
-				s.db.Unscoped().Where("name = ? AND id NOT IN ?", t.Name, templateIDs).Delete(&workflow.WorkflowTemplate{})
+			// 更新关联的机器
+			if len(machineIDs) > 0 {
+				var machines []machine.Machine
+				s.db.Where("id IN ?", machineIDs).Find(&machines)
+				s.db.Model(&mg).Association("Machines").Replace(machines)
 			}
 		}
-		solution.TemplateIDs = toJSON(templateIDs)
 	}
 
-	// 处理工作流冲突
-	workflowIDs := parseIDs(solution.WorkflowIDs)
-	if len(workflowIDs) > 0 {
-		var workflows []workflow.Workflow
-		s.db.Where("id IN ?", workflowIDs).Find(&workflows)
-		for _, wf := range workflows {
-			if decisions["workflows"] != nil && decisions["workflows"][wf.Name] == "skip" {
-				workflowIDs = removeUint(workflowIDs, wf.ID)
+	// 导入全局变量
+	var variableIDs []uint
+	for _, v := range pack.GlobalVariables {
+		// 检查冲突处理
+		if decisions["variables"] != nil && decisions["variables"][v.Key] == "skip" {
+			// 查找已有的变量ID
+			var existing workflow.GlobalVariable
+			if err := s.db.Where("`key` = ?", v.Key).First(&existing).Error; err == nil {
+				variableIDs = append(variableIDs, existing.ID)
 				continue
 			}
-			if decisions["workflows"] != nil && decisions["workflows"][wf.Name] == "overwrite" {
-				var oldWf workflow.Workflow
-				if err := s.db.Where("name = ? AND id NOT IN ?", wf.Name, workflowIDs).First(&oldWf).Error; err == nil {
-					s.db.Unscoped().Where("workflow_id = ?", oldWf.ID).Delete(&workflow.WorkflowHook{})
-					s.db.Unscoped().Where("stage_group_id IN (?)",
-						s.db.Model(&workflow.WorkflowStageGroup{}).Select("id").Where("workflow_id = ?", oldWf.ID),
-					).Delete(&workflow.WorkflowStage{})
-					s.db.Unscoped().Where("workflow_id = ?", oldWf.ID).Delete(&workflow.WorkflowStageGroup{})
-					s.db.Unscoped().Delete(&oldWf)
+		}
+		if decisions["variables"] != nil && decisions["variables"][v.Key] == "overwrite" {
+			s.db.Unscoped().Where("`key` = ?", v.Key).Delete(&workflow.GlobalVariable{})
+		}
+		// 使用用户修改后的值（如果有）
+		val := v.Value
+		if variableValues != nil && variableValues[v.Key] != "" {
+			val = variableValues[v.Key]
+		}
+		gv := workflow.GlobalVariable{
+			Key: v.Key, Type: v.Type, Value: val,
+			Description: v.Description, Group: v.Group,
+			Source: pack.Metadata.Name,
+		}
+		s.db.Create(&gv)
+		variableIDs = append(variableIDs, gv.ID)
+	}
+
+	// 导入钩子模板
+	var hookIDs []uint
+	for _, h := range pack.Hooks {
+		if decisions["hooks"] != nil && decisions["hooks"][h.Name] == "skip" {
+			var existing workflow.HookTemplate
+			if err := s.db.Where("name = ?", h.Name).First(&existing).Error; err == nil {
+				hookIDs = append(hookIDs, existing.ID)
+				continue
+			}
+		}
+		if decisions["hooks"] != nil && decisions["hooks"][h.Name] == "overwrite" {
+			s.db.Unscoped().Where("name = ?", h.Name).Delete(&workflow.HookTemplate{})
+		}
+		ht := workflow.HookTemplate{
+			Name: h.Name, Description: h.Description, Module: h.Module,
+			Params: h.Params, Timeout: h.Timeout, IgnoreErrors: h.IgnoreErrors,
+			Retries: h.Retries, Delay: h.Delay,
+			Source: pack.Metadata.Name,
+		}
+		s.db.Create(&ht)
+		hookIDs = append(hookIDs, ht.ID)
+	}
+
+	// 导入模板文件
+	var templateIDs []uint
+	for _, t := range pack.WorkflowTemplates {
+		if decisions["templates"] != nil && decisions["templates"][t.Name] == "skip" {
+			var existing workflow.WorkflowTemplate
+			if err := s.db.Where("name = ?", t.Name).First(&existing).Error; err == nil {
+				templateIDs = append(templateIDs, existing.ID)
+				continue
+			}
+		}
+		if decisions["templates"] != nil && decisions["templates"][t.Name] == "overwrite" {
+			s.db.Unscoped().Where("name = ?", t.Name).Delete(&workflow.WorkflowTemplate{})
+		}
+		wt := workflow.WorkflowTemplate{
+			Name: t.Name, Description: t.Description, Content: t.Content,
+			Source: pack.Metadata.Name,
+		}
+		s.db.Create(&wt)
+		templateIDs = append(templateIDs, wt.ID)
+	}
+
+	// 导入阶段模板
+	var stageIDs []uint
+	for _, st := range pack.Stages {
+		if decisions["stages"] != nil && decisions["stages"][st.Name] == "skip" {
+			var existing workflow.StageTemplate
+			if err := s.db.Where("name = ?", st.Name).First(&existing).Error; err == nil {
+				stageIDs = append(stageIDs, existing.ID)
+				continue
+			}
+		}
+		if decisions["stages"] != nil && decisions["stages"][st.Name] == "overwrite" {
+			s.db.Unscoped().Where("name = ?", st.Name).Delete(&workflow.StageTemplate{})
+		}
+		var machineGroupID uint
+		// 机器分组已在前面处理完毕，直接按名称查找
+		if st.MachineGroup != "" {
+			var mg machine.MachineGroup
+			if err := s.db.Where("name = ?", st.MachineGroup).First(&mg).Error; err == nil {
+				machineGroupID = mg.ID
+			}
+		}
+		var tasks []workflow.StageTask
+		for _, t := range st.Tasks {
+			var hooksJSON string
+			if len(t.Hooks) > 0 {
+				b, _ := json.Marshal(t.Hooks)
+				hooksJSON = string(b)
+			}
+			tasks = append(tasks, workflow.StageTask{
+				Ref: t.Ref, Name: t.Name, Module: t.Module, Order: t.Order,
+				Params: t.Params, When: t.When, Hooks: hooksJSON,
+				Loop: t.Loop, Timeout: t.Timeout, IgnoreErrors: t.IgnoreErrors,
+				Retries: t.Retries, Delay: t.Delay, Register: t.Register,
+			})
+		}
+		tasksJSON, _ := json.Marshal(tasks)
+		ver := generateVersionString()
+		stage := workflow.StageTemplate{
+			Name:           st.Name,
+			Description:    st.Description,
+			MachineGroupID: machineGroupID,
+			Tasks:          string(tasksJSON),
+			Version:        ver,
+			Source:         pack.Metadata.Name,
+		}
+		s.db.Create(&stage)
+		// 创建版本记录（用于版本回滚）
+		version := workflow.StageTemplateVersion{
+			TemplateID:     stage.ID,
+			Version:        ver,
+			Name:           st.Name,
+			Description:    st.Description,
+			MachineGroupID: machineGroupID,
+			Tasks:          string(tasksJSON),
+			ChangeNote:     "方案导入初始版本",
+		}
+		s.db.Create(&version)
+		stageIDs = append(stageIDs, stage.ID)
+	}
+
+	// 导入工作流
+	var workflowIDs []uint
+	for _, pw := range pack.Workflows {
+		if decisions["workflows"] != nil && decisions["workflows"][pw.Name] == "skip" {
+			var existing workflow.Workflow
+			if err := s.db.Where("name = ?", pw.Name).First(&existing).Error; err == nil {
+				workflowIDs = append(workflowIDs, existing.ID)
+				continue
+			}
+		}
+		if decisions["workflows"] != nil && decisions["workflows"][pw.Name] == "overwrite" {
+			var oldWf workflow.Workflow
+			if err := s.db.Where("name = ?", pw.Name).First(&oldWf).Error; err == nil {
+				s.db.Transaction(func(tx *gorm.DB) error {
+					// 删除执行记录（task → stage → stage_group → execution）
+					var stageExecIDs []uint
+					tx.Model(&workflow.WorkflowStageExecution{}).
+						Where("stage_group_execution_id IN (SELECT id FROM workflow_stage_group_executions WHERE execution_id IN (SELECT id FROM workflow_executions WHERE workflow_id = ?))", oldWf.ID).
+						Pluck("id", &stageExecIDs)
+					if len(stageExecIDs) > 0 {
+						tx.Where("stage_execution_id IN ?", stageExecIDs).Delete(&workflow.WorkflowTaskExecution{})
+					}
+					var stageGroupExecIDs []uint
+					tx.Model(&workflow.WorkflowStageGroupExecution{}).
+						Where("execution_id IN (SELECT id FROM workflow_executions WHERE workflow_id = ?)", oldWf.ID).
+						Pluck("id", &stageGroupExecIDs)
+					if len(stageGroupExecIDs) > 0 {
+						tx.Where("stage_group_execution_id IN ?", stageGroupExecIDs).Delete(&workflow.WorkflowStageExecution{})
+					}
+					tx.Where("execution_id IN (SELECT id FROM workflow_executions WHERE workflow_id = ?)", oldWf.ID).
+						Delete(&workflow.WorkflowStageGroupExecution{})
+					tx.Where("workflow_id = ?", oldWf.ID).Delete(&workflow.WorkflowExecution{})
+
+					// 删除 tasks（通过 stages 关联）
+					var groupIDs []uint
+					tx.Model(&workflow.WorkflowStageGroup{}).Where("workflow_id = ?", oldWf.ID).Pluck("id", &groupIDs)
+					if len(groupIDs) > 0 {
+						var sIDs []uint
+						tx.Model(&workflow.WorkflowStage{}).Where("stage_group_id IN ?", groupIDs).Pluck("id", &sIDs)
+						if len(sIDs) > 0 {
+							tx.Where("stage_id IN ?", sIDs).Delete(&workflow.WorkflowTask{})
+						}
+						tx.Where("stage_group_id IN ?", groupIDs).Delete(&workflow.WorkflowStage{})
+					}
+					tx.Where("workflow_id = ?", oldWf.ID).Delete(&workflow.WorkflowStageGroup{})
+					tx.Where("workflow_id = ?", oldWf.ID).Delete(&workflow.WorkflowHook{})
+					tx.Delete(&oldWf)
+					return nil
+				})
+			}
+		}
+		wf := workflow.Workflow{
+			Name:        pw.Name,
+			Description: pw.Description,
+			CreatedBy:   "import",
+		}
+		s.db.Create(&wf)
+
+		// 导入工作流钩子
+		for _, ph := range pw.Hooks {
+			wh := workflow.WorkflowHook{
+				WorkflowID:   wf.ID,
+				Name:         ph.Name,
+				Module:       ph.Module,
+				Params:       ph.Params,
+				Timeout:      ph.Timeout,
+				IgnoreErrors: ph.IgnoreErrors,
+				Retries:      ph.Retries,
+				Delay:        ph.Delay,
+			}
+			s.db.Create(&wh)
+		}
+
+		// 导入阶段组
+		for _, psg := range pw.StageGroups {
+			sg := workflow.WorkflowStageGroup{
+				WorkflowID:  wf.ID,
+				Name:        psg.Name,
+				Description: psg.Description,
+				Order:       psg.Order,
+				Mode:        psg.Mode,
+			}
+			s.db.Create(&sg)
+
+			for _, pws := range psg.Stages {
+				var machineGroupID uint
+				// 机器分组已在前面处理完毕，直接按名称查找
+				if pws.MachineGroup != "" {
+					var mg machine.MachineGroup
+					if err := s.db.Where("name = ?", pws.MachineGroup).First(&mg).Error; err == nil {
+						machineGroupID = mg.ID
+					}
+				}
+				st := workflow.WorkflowStage{
+					StageGroupID:   sg.ID,
+					Name:           pws.Name,
+					Description:    pws.Description,
+					Order:          pws.Order,
+					MachineGroupID: machineGroupID,
+				}
+				s.db.Create(&st)
+
+				for _, pwt := range pws.Tasks {
+					var hooksJSON string
+					if len(pwt.Hooks) > 0 {
+						b, _ := json.Marshal(pwt.Hooks)
+						hooksJSON = string(b)
+					}
+					task := workflow.WorkflowTask{
+						StageID:      st.ID,
+						Ref:          pwt.Ref,
+						Name:         pwt.Name,
+						Module:       pwt.Module,
+						Params:       pwt.Params,
+						Order:        pwt.Order,
+						When:         pwt.When,
+						Hooks:        hooksJSON,
+						Loop:         pwt.Loop,
+						Timeout:      pwt.Timeout,
+						IgnoreErrors: pwt.IgnoreErrors,
+						Retries:      pwt.Retries,
+						Delay:        pwt.Delay,
+						Register:     pwt.Register,
+					}
+					s.db.Create(&task)
 				}
 			}
 		}
-		solution.WorkflowIDs = toJSON(workflowIDs)
+		workflowIDs = append(workflowIDs, wf.ID)
 	}
+
+	// 更新方案记录：写入关联ID，清空 pack_data
+	solution.StageIDs = toJSON(stageIDs)
+	solution.VariableIDs = toJSON(variableIDs)
+	solution.HookIDs = toJSON(hookIDs)
+	solution.TemplateIDs = toJSON(templateIDs)
+	solution.WorkflowIDs = toJSON(workflowIDs)
+	solution.PackData = "" // 应用后清空原始数据
 
 	// 更新统计
 	s.updateCounts(&solution)
 
 	// 保存更新
 	return s.db.Save(&solution).Error
-}
-
-// removeUint 从切片中移除指定值
-func removeUint(ids []uint, id uint) []uint {
-	for i, v := range ids {
-		if v == id {
-			return append(ids[:i], ids[i+1:]...)
-		}
-	}
-	return ids
 }

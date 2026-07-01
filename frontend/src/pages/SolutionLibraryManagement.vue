@@ -48,7 +48,23 @@
               <Icon :icon="getCategoryIcon(pkg.category)" :size="28" />
             </div>
             <div class="package-meta">
-              <div class="package-name">{{ pkg.name }}</div>
+              <div class="package-name">
+                {{ pkg.name }}
+                <el-tag 
+                  v-if="pkg.pack_data" 
+                  size="small" 
+                  type="warning" 
+                  effect="dark"
+                  class="status-tag"
+                >未应用</el-tag>
+                <el-tag 
+                  v-else 
+                  size="small" 
+                  type="success" 
+                  effect="dark"
+                  class="status-tag"
+                >已应用</el-tag>
+              </div>
               <div class="package-category">
                 <el-tag size="small" type="info" effect="plain">{{ pkg.category || '其他' }}</el-tag>
                 <span v-if="pkg.version" class="package-version">v{{ pkg.version }}</span>
@@ -65,13 +81,13 @@
           <div class="package-footer">
             <span class="package-author">{{ pkg.author || '未知' }}</span>
             <div class="package-actions">
-              <el-button type="warning" link size="small" @click="handleApply(pkg)">
+              <el-button type="warning" link size="small" @click="handleApply(pkg)" v-if="pkg.pack_data">
                 <Icon icon="mdi:play-circle-outline" :size="14" /> 应用
               </el-button>
               <el-button type="info" link size="small" @click="viewPackage(pkg)">
                 <Icon icon="mdi:eye-outline" :size="14" /> 查看
               </el-button>
-              <el-button type="primary" link size="small" @click="editPackage(pkg)">
+              <el-button type="primary" link size="small" @click="editPackage(pkg)" v-if="!pkg.pack_data">
                 <Icon icon="mdi:pencil" :size="14" /> 编辑
               </el-button>
               <el-button type="success" link size="small" @click="exportPackage(pkg)">
@@ -386,72 +402,13 @@
       </template>
     </el-dialog>
 
-    <!-- 冲突检测对话框 -->
-    <el-dialog v-model="conflictDialogVisible" title="应用方案 - 冲突检测" width="700px" destroy-on-close>
-      <div v-if="conflictData" class="conflict-dialog">
-        <!-- 导入摘要 -->
-        <div class="conflict-summary">
-          <h4>应用内容摘要</h4>
-          <div class="summary-grid">
-            <span v-if="conflictData.summary.stage_count"><Icon icon="mdi:view-column-outline" :size="14" /> {{ conflictData.summary.stage_count }} 阶段</span>
-            <span v-if="conflictData.summary.variable_count"><Icon icon="mdi:code-json" :size="14" /> {{ conflictData.summary.variable_count }} 变量</span>
-            <span v-if="conflictData.summary.hook_count"><Icon icon="mdi:hook" :size="14" /> {{ conflictData.summary.hook_count }} 钩子</span>
-            <span v-if="conflictData.summary.template_count"><Icon icon="mdi:file-document-outline" :size="14" /> {{ conflictData.summary.template_count }} 模板</span>
-            <span v-if="conflictData.summary.file_count"><Icon icon="mdi:database" :size="14" /> {{ conflictData.summary.file_count }} 文件</span>
-            <span v-if="conflictData.summary.workflow_count"><Icon icon="mdi:play-circle-outline" :size="14" /> {{ conflictData.summary.workflow_count }} 工作流</span>
-          </div>
-        </div>
-
-        <!-- 无冲突 -->
-        <div v-if="!conflictData.has_conflicts" class="conflict-free">
-          <Icon icon="mdi:check-circle" :size="48" style="color: var(--el-color-success)" />
-          <p>未检测到名称冲突，可以直接应用</p>
-        </div>
-
-        <!-- 有冲突 -->
-        <div v-else class="conflict-list">
-          <div class="conflict-header">
-            <h4>检测到 {{ conflictData.conflicts.length }} 个名称冲突</h4>
-            <div class="conflict-actions-all">
-              <el-button size="small" @click="handleAllDecisions('skip')">全部跳过</el-button>
-              <el-button size="small" type="danger" @click="handleAllDecisions('overwrite')">全部覆盖</el-button>
-            </div>
-          </div>
-          <div class="conflict-items">
-            <div v-for="(item, index) in conflictData.conflicts" :key="index" class="conflict-item">
-              <div class="conflict-item-info">
-                <el-tag size="small" :type="getConflictTypeTag(item.type)">{{ getConflictTypeName(item.type) }}</el-tag>
-                <span class="conflict-name">{{ item.name }}</span>
-                <span class="conflict-source">已有来源: {{ item.existing_source || '未知' }}</span>
-              </div>
-              <div class="conflict-item-actions">
-                <el-button 
-                  size="small" 
-                  :type="getDecision(item.type, item.name) === 'skip' ? 'info' : ''"
-                  @click="setDecision(item.type, item.name, 'skip')"
-                >跳过</el-button>
-                <el-button 
-                  size="small" 
-                  :type="getDecision(item.type, item.name) === 'overwrite' ? 'danger' : ''"
-                  @click="setDecision(item.type, item.name, 'overwrite')"
-                >覆盖</el-button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-      <template #footer>
-        <el-button @click="conflictDialogVisible = false">取消</el-button>
-        <el-button 
-          type="primary" 
-          @click="handleApplyWithDecisions" 
-          :loading="applying"
-          :disabled="conflictData?.has_conflicts && !hasAllDecisions"
-        >
-          {{ conflictData?.has_conflicts ? '确认应用' : '开始应用' }}
-        </el-button>
-      </template>
-    </el-dialog>
+    <!-- 应用方案 - 全屏页面 -->
+    <SolutionApplyPage
+      v-if="applyPageVisible"
+      :solution-id="applyPageSolutionId"
+      @close="applyPageVisible = false"
+      @applied="onApplied"
+    />
   </div>
 </template>
 
@@ -468,10 +425,10 @@ import {
   deleteSolutionLibraryApi,
   exportSolutionLibraryApi,
   importSolutionLibraryApi,
-  applySolutionLibraryApi,
   type SolutionLibrary,
   type OrbitPack,
 } from '@/api/solutionLibrary'
+import SolutionApplyPage from './SolutionApplyPage.vue'
 import { getStageTemplatesApi, type StageTemplate } from '@/api/stageTemplate'
 import { getGlobalVariablesApi, type GlobalVariable } from '@/api/globalVariable'
 import { getHookTemplatesApi, type HookTemplate } from '@/api/hookTemplate'
@@ -489,17 +446,13 @@ const createDialogVisible = ref(false)
 const importDialogVisible = ref(false)
 const submitting = ref(false)
 const importing = ref(false)
-const applying = ref(false)
 const createFormRef = ref()
 const importYaml = ref('')
 const importUploadRef = ref()
 
-// 冲突检测相关
-const conflictDialogVisible = ref(false)
-const conflictPack = ref<OrbitPack | null>(null)
-const conflictData = ref<any>(null)
-const conflictDecisions = ref<Record<string, Record<string, string>>>({})
-const applySolutionId = ref<number | null>(null)
+// 应用方案页面
+const applyPageVisible = ref(false)
+const applyPageSolutionId = ref(0)
 
 // 查看/编辑相关
 const viewDialogVisible = ref(false)
@@ -825,88 +778,6 @@ async function handleImport() {
   }
 }
 
-// 冲突对话框辅助函数
-function getConflictTypeName(type: string): string {
-  const names: Record<string, string> = {
-    stages: '阶段', variables: '变量', hooks: '钩子',
-    templates: '模板', files: '文件', workflows: '工作流', solution: '方案',
-  }
-  return names[type] || type
-}
-
-function getConflictTypeTag(type: string): string {
-  const tags: Record<string, string> = {
-    stages: '', variables: 'success', hooks: 'warning',
-    templates: 'info', files: 'info', workflows: 'danger', solution: 'danger',
-  }
-  return tags[type] || ''
-}
-
-function getDecision(type: string, name: string): string {
-  return conflictDecisions.value[type]?.[name] || ''
-}
-
-function setDecision(type: string, name: string, decision: string) {
-  if (!conflictDecisions.value[type]) {
-    conflictDecisions.value[type] = {}
-  }
-  conflictDecisions.value[type][name] = decision
-}
-
-function handleAllDecisions(decision: string) {
-  if (!conflictData.value?.conflicts) return
-  for (const item of conflictData.value.conflicts) {
-    setDecision(item.type, item.name, decision)
-  }
-}
-
-const hasAllDecisions = computed(() => {
-  if (!conflictData.value?.conflicts) return true
-  return conflictData.value.conflicts.every(
-    (item: any) => conflictDecisions.value[item.type]?.[item.name]
-  )
-})
-
-async function handleApply(pkg: SolutionLibrary) {
-  applying.value = true
-  try {
-    const result = await applySolutionLibraryApi(pkg.id) as any
-    if (result?.has_conflicts) {
-      // 有冲突，显示冲突对话框
-      applySolutionId.value = pkg.id
-      conflictData.value = result
-      conflictDecisions.value = {}
-      conflictDialogVisible.value = true
-    } else {
-      // 无冲突，后端已直接应用成功
-      ElMessage.success(result?.message || '应用成功')
-      loadData()
-    }
-  } catch (e: any) {
-    ElMessage.error('应用失败: ' + (e?.message || '未知错误'))
-  } finally {
-    applying.value = false
-  }
-}
-
-async function handleApplyWithDecisions() {
-  if (!applySolutionId.value) return
-  applying.value = true
-  try {
-    await applySolutionLibraryApi(
-      applySolutionId.value,
-      conflictData.value?.has_conflicts ? conflictDecisions.value : undefined,
-    )
-    ElMessage.success('应用成功')
-    conflictDialogVisible.value = false
-    loadData()
-  } catch (e: any) {
-    ElMessage.error('应用失败: ' + (e?.message || '未知错误'))
-  } finally {
-    applying.value = false
-  }
-}
-
 async function exportPackage(pkg: SolutionLibrary) {
   try {
     const pack = await exportSolutionLibraryApi(pkg.id)
@@ -938,6 +809,16 @@ async function deletePackage(pkg: SolutionLibrary) {
   } catch {
     // 取消
   }
+}
+
+function handleApply(pkg: SolutionLibrary) {
+  applyPageSolutionId.value = pkg.id
+  applyPageVisible.value = true
+}
+
+function onApplied() {
+  applyPageVisible.value = false
+  loadData()
 }
 
 onMounted(loadData)
@@ -993,6 +874,13 @@ onMounted(loadData)
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-tag {
+  flex-shrink: 0;
 }
 
 .package-category {

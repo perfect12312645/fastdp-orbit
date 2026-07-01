@@ -69,10 +69,20 @@
     <!-- 创建/编辑对话框 -->
     <el-dialog
       v-model="dialogVisible"
-      :title="editingId ? '编辑钩子' : '创建钩子'"
       width="640px"
       destroy-on-close
     >
+      <template #header>
+        <div class="hook-template-editor-header">
+          <span>{{ editingId ? '编辑钩子' : '创建钩子' }}</span>
+          <div class="hook-template-editor-header-actions">
+            <el-button @click="dialogVisible = false" size="small">取消</el-button>
+            <el-button type="primary" @click="handleSubmit" :loading="submitting" size="small">
+              {{ editingId ? '保存' : '创建' }}
+            </el-button>
+          </div>
+        </div>
+      </template>
       <el-form :model="form" label-width="90px" ref="formRef" :rules="formRules">
         <el-row :gutter="16">
           <el-col :span="12">
@@ -178,12 +188,6 @@
           <el-checkbox v-model="form.ignore_errors">即使钩子失败也继续</el-checkbox>
         </el-form-item>
       </el-form>
-      <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="handleSubmit" :loading="submitting">
-          {{ editingId ? '保存' : '创建' }}
-        </el-button>
-      </template>
     </el-dialog>
   </div>
 </template>
@@ -471,5 +475,17 @@ onMounted(loadData)
 .module-option-desc {
   color: var(--el-text-color-secondary);
   font-size: 12px;
+}
+
+.hook-template-editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.hook-template-editor-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 </style>

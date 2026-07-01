@@ -3,9 +3,9 @@ package orchestrator
 import (
 	"encoding/base64"
 	"fmt"
-	"html/template"
 	"os"
 	"strings"
+	"text/template"
 )
 
 // 支持的运算符

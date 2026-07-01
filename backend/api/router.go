@@ -150,6 +150,7 @@ func SetupRouter(cfg *config.ServerConfig, mc *cache.MachineCache, pool *serverg
 			solutionLibraries.GET("/:id/export", views.ExportSolutionLibrary)
 			solutionLibraries.POST("/import", views.ImportSolutionLibrary)
 			solutionLibraries.POST("/:id/apply", views.ApplySolutionLibrary)
+			solutionLibraries.POST("/download-proxy", views.DownloadFileProxy)
 		}
 
 		// Storage（文件存储管理）

@@ -2,8 +2,10 @@ package views
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"fastdp-orbit/backend/models/workflow"
 	workflowsvc "fastdp-orbit/backend/services/workflow"
@@ -20,7 +22,9 @@ type ImportSolutionLibraryRequest struct {
 
 // ApplySolutionLibraryRequest 应用方案请求
 type ApplySolutionLibraryRequest struct {
-	Decisions map[string]map[string]string `json:"decisions,omitempty"` // type -> name -> "skip"|"overwrite"
+	Decisions           map[string]map[string]string `json:"decisions,omitempty"`             // type -> name -> "skip"|"overwrite"
+	VariableValues      map[string]string            `json:"variable_values,omitempty"`       // key -> value (用户修改后的变量值)
+	MachineGroupMachines map[string][]uint            `json:"machine_group_machines,omitempty"` // 分组名 -> 机器ID列表
 }
 
 // ConflictResponse 冲突检测响应
@@ -294,28 +298,17 @@ func ApplySolutionLibrary(c *gin.Context) {
 
 	solutionID := uint(id)
 
-	// 如果没有提供决策，进行冲突检测并返回
+	// 如果没有提供决策，进行冲突检测并返回（即使无冲突也要让用户配置变量和机器分组）
 	if req.Decisions == nil {
 		conflicts, svcSummary, err := WorkflowService.CheckApplyConflicts(solutionID)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"code": -1, "message": err.Error()})
 			return
 		}
-		// 无冲突，直接应用
-		if len(conflicts) == 0 {
-			err = WorkflowService.ApplySolutionLibraryWithDecisions(solutionID, nil)
-			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"code": -1, "message": "应用失败: " + err.Error()})
-				return
-			}
-			c.JSON(http.StatusOK, gin.H{"code": 0, "message": "应用成功"})
-			return
-		}
-		// 有冲突，返回冲突数据供用户决策
 		c.JSON(http.StatusOK, gin.H{
 			"code": 0, "message": "success",
 			"data": ConflictResponse{
-				HasConflicts: true,
+				HasConflicts: len(conflicts) > 0,
 				Conflicts:    conflicts,
 				Summary: ImportSummary{
 					StageCount:    svcSummary.StageCount,
@@ -331,10 +324,45 @@ func ApplySolutionLibrary(c *gin.Context) {
 	}
 
 	// 有决策，执行应用
-	err = WorkflowService.ApplySolutionLibraryWithDecisions(solutionID, req.Decisions)
+	err = WorkflowService.ApplySolutionLibraryWithDecisions(solutionID, req.Decisions, req.VariableValues, req.MachineGroupMachines)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "message": "应用失败: " + err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"code": 0, "message": "success"})
+}
+
+// DownloadFileProxy 文件下载代理，解决前端跨域问题
+func DownloadFileProxy(c *gin.Context) {
+	var req struct {
+		URL string `json:"url" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "message": "参数错误"})
+		return
+	}
+
+	resp, err := http.Get(req.URL)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "message": "下载失败: " + err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		c.JSON(http.StatusBadGateway, gin.H{"code": -1, "message": "远程服务器返回 " + resp.Status})
+		return
+	}
+
+	// 从URL提取文件名
+	parts := strings.Split(req.URL, "/")
+	filename := parts[len(parts)-1]
+	if filename == "" {
+		filename = "download"
+	}
+
+	c.Header("Content-Disposition", "attachment; filename=\""+filename+"\"")
+	c.Header("Content-Type", resp.Header.Get("Content-Type"))
+	c.Header("Content-Length", resp.Header.Get("Content-Length"))
+	io.Copy(c.Writer, resp.Body)
 }

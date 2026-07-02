@@ -36,8 +36,7 @@ func ListGlobalVariables(c *gin.Context) {
 		return
 	}
 
-	packageGroup := c.Query("source")
-	vars, err := WorkflowService.ListGlobalVariables(packageGroup)
+	vars, err := WorkflowService.ListGlobalVariables()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "message": err.Error()})
 		return

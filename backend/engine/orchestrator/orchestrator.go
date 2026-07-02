@@ -623,6 +623,7 @@ func (o *Orchestrator) RetryExecution(executionID uint) error {
 // ExecuteTaskForStage 为单阶段执行服务暴露的任务执行方法
 // 复用 executeTask 的核心逻辑，但写入 StageTaskExecution 表
 func (o *Orchestrator) ExecuteTaskForStage(ctx context.Context, taskExec *workflow.StageTaskExecution, task *workflow.StageTask, m *machine.Machine, hooks []workflow.WorkflowHook, params map[string]string, globalVars map[string]interface{}, groupVars map[string]interface{}, groupsMap map[string]interface{}, loopItem interface{}, registeredVars map[string]map[string]map[string]interface{}, registeredVarsMu *sync.RWMutex) {
+	logger.Info("任务执行开始", zap.String("task_id", fmt.Sprintf("ref-%d", task.Ref)), zap.String("machine", fmt.Sprintf("%s:%d", m.IP, m.Port)))
 	host := fmt.Sprintf("%s:%d", m.IP, m.Port)
 
 	templateVars := map[string]interface{}{
@@ -710,6 +711,8 @@ func (o *Orchestrator) ExecuteTaskForStage(ctx context.Context, taskExec *workfl
 	var hasAgentResponse bool
 	var lastChanged bool
 	for attempt := 0; attempt <= maxRetries; attempt++ {
+		logger.Info("开始执行任务", zap.String("尝试次数", fmt.Sprintf("%d/%d", attempt+1, maxRetries+1)), zap.String("task_id", fmt.Sprintf("ref-%d", task.Ref)))
+
 		if ctx.Err() != nil {
 			taskExec.Status = "skipped"
 			taskExec.Error = "执行被中断"
@@ -760,13 +763,16 @@ func (o *Orchestrator) ExecuteTaskForStage(ctx context.Context, taskExec *workfl
 		}
 
 		if err != nil {
+			logger.Error("gRPC调用失败", zap.String("machine", host), zap.Error(err))
 			lastErr = fmt.Sprintf("gRPC调用失败: %v", err)
 			continue
 		}
 
 		if !resp.Success {
+			logger.Error("任务执行失败", zap.String("machine", host), zap.String("task_id", fmt.Sprintf("ref-%d", task.Ref)))
 			hasAgentResponse = true
 			lastChanged = resp.Changed
+			taskExec.Output = resp.Stdout // 失败时也保留输出（如脚本打印的错误信息）
 			if resp.Error != nil {
 				taskExec.ErrorCode = resp.Error.Code
 				taskExec.Error = resp.Error.Message
@@ -779,6 +785,7 @@ func (o *Orchestrator) ExecuteTaskForStage(ctx context.Context, taskExec *workfl
 		}
 
 		// 成功
+		logger.Info("任务执行成功", zap.String("machine", host), zap.String("task_id", fmt.Sprintf("ref-%d", task.Ref)))
 		taskExec.Status = "success"
 		taskExec.Output = resp.Stdout
 		taskExec.Changed = resp.Changed
@@ -815,6 +822,7 @@ func (o *Orchestrator) ExecuteTaskForStage(ctx context.Context, taskExec *workfl
 	}
 
 	// 所有重试均失败
+	logger.Error("所有重试均失败", zap.String("task_id", fmt.Sprintf("ref-%d", task.Ref)), zap.String("machine", fmt.Sprintf("%s:%d", m.IP, m.Port)), zap.String("错误", lastErr))
 	taskExec.Status = "failed"
 	taskExec.Error = lastErr
 
@@ -1228,7 +1236,7 @@ func (o *Orchestrator) executeStage(ctx context.Context, execution *workflow.Wor
 				var failCount int32
 				var wg sync.WaitGroup
 
-					for _, m := range stage.MachineGroup.Machines {
+				for _, m := range stage.MachineGroup.Machines {
 					host := fmt.Sprintf("%s:%d", m.IP, m.Port)
 					wg.Add(1)
 					go func(m machine.Machine) {
@@ -1475,6 +1483,8 @@ func (o *Orchestrator) executeTask(ctx context.Context, taskExec *workflow.Workf
 	var hasAgentResponse bool // 是否成功连接到 agent 并拿到业务响应
 	var lastChanged bool      // 最后一次业务响应的 changed 状态
 	for attempt := 0; attempt <= maxRetries; attempt++ {
+		logger.Info("开始执行任务", zap.String("尝试次数", fmt.Sprintf("%d/%d", attempt+1, maxRetries+1)), zap.String("task_id", fmt.Sprintf("ref-%d", task.Ref)))
+
 		if ctx.Err() != nil {
 			taskExec.Status = "skipped"
 			taskExec.Error = "执行被中断"
@@ -1535,6 +1545,7 @@ func (o *Orchestrator) executeTask(ctx context.Context, taskExec *workflow.Workf
 			// 业务失败（agent 已响应，但执行失败）
 			hasAgentResponse = true
 			lastChanged = resp.Changed
+			taskExec.Output = resp.Stdout
 			if resp.Error != nil {
 				taskExec.ErrorCode = resp.Error.Code
 				taskExec.Error = resp.Error.Message

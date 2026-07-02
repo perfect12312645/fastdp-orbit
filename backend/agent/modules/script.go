@@ -34,6 +34,10 @@ func (m *ScriptModule) Run(req *agent.ExecRequest) (*agent.ExecResponse, error) 
 	scriptContent := req.Parameters["script"]
 	scriptFile := req.Parameters["script_file"]
 
+	// 记录接收到的参数
+	logger.Info("开始执行脚本", zap.String("task_id", req.TaskId), zap.String("machine_id", req.MachineId))
+	logger.Info("脚本参数", zap.String("script_content_length", fmt.Sprintf("%d", len(scriptContent))), zap.String("script_file", scriptFile))
+
 	// 至少指定一个
 	if scriptContent == "" && scriptFile == "" {
 		return utils.ErrorResponse(req, ScriptErrInvalidParams, "必须指定 script（脚本内容）或 script_file（脚本路径）"), nil
@@ -44,10 +48,12 @@ func (m *ScriptModule) Run(req *agent.ExecRequest) (*agent.ExecResponse, error) 
 		if !utils.FileExists(scriptFile) {
 			return utils.ErrorResponse(req, ScriptErrInvalidParams, fmt.Sprintf("脚本文件不存在: %s", scriptFile)), nil
 		}
+		logger.Info("直接执行脚本文件", zap.String("script_file", scriptFile))
 		return executeScriptFile(req, scriptFile)
 	}
 
 	// 写临时文件 → 执行 → 清理
+	logger.Info("准备写入临时脚本文件", zap.String("script_content_length", fmt.Sprintf("%d", len(scriptContent))))
 	return executeScriptContent(req, scriptContent)
 }
 
@@ -57,10 +63,17 @@ func executeScriptContent(req *agent.ExecRequest, content string) (*agent.ExecRe
 
 	// 写入脚本内容
 	if err := os.WriteFile(tmpFile, []byte(content), 0755); err != nil {
-		logger.Error("写临时脚本文件失败", zap.Error(err))
+		logger.Error("写临时脚本文件失败", zap.Error(err), zap.String("tmp_file", tmpFile))
 		return utils.ErrorResponse(req, ScriptErrWriteFailed, fmt.Sprintf("写临时脚本文件失败: %v", err)), nil
 	}
 	defer os.Remove(tmpFile)
+
+	// 验证文件是否创建成功
+	if _, err := os.Stat(tmpFile); err != nil {
+		logger.Error("临时脚本文件创建失败", zap.Error(err), zap.String("tmp_file", tmpFile))
+		return utils.ErrorResponse(req, ScriptErrWriteFailed, fmt.Sprintf("临时脚本文件创建失败: %v", err)), nil
+	}
+	logger.Info("临时脚本文件创建成功", zap.String("tmp_file", tmpFile))
 
 	return runBash(req, tmpFile)
 }

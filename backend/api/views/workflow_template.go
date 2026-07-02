@@ -36,8 +36,7 @@ func ListWorkflowTemplates(c *gin.Context) {
 		return
 	}
 
-	packageGroup := c.Query("source")
-	templates, err := WorkflowService.ListWorkflowTemplates(packageGroup)
+	templates, err := WorkflowService.ListWorkflowTemplates()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "message": "系统内部错误"})
 		return

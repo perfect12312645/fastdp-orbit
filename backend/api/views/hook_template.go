@@ -42,8 +42,7 @@ func ListHookTemplates(c *gin.Context) {
 		return
 	}
 
-	packageGroup := c.Query("source")
-	templates, err := WorkflowService.ListHookTemplates(packageGroup)
+	templates, err := WorkflowService.ListHookTemplates()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "message": "系统内部错误"})
 		return

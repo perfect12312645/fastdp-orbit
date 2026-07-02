@@ -8,14 +8,10 @@ import (
 
 // ==================== HookTemplate CRUD ====================
 
-// ListHookTemplates 获取钩子模板（支持按分组过滤）
-func (s *Service) ListHookTemplates(packageGroup string) ([]workflow.HookTemplate, error) {
+// ListHookTemplates 获取钩子模板
+func (s *Service) ListHookTemplates() ([]workflow.HookTemplate, error) {
 	var templates []workflow.HookTemplate
-	query := s.db.Order("created_at DESC")
-	if packageGroup != "" {
-		query = query.Where("package_group = ?", packageGroup)
-	}
-	if err := query.Find(&templates).Error; err != nil {
+	if err := s.db.Order("created_at DESC").Find(&templates).Error; err != nil {
 		return nil, err
 	}
 	return templates, nil
@@ -38,11 +34,11 @@ func (s *Service) CreateHookTemplate(t *workflow.HookTemplate) error {
 	if t.Module == "" {
 		return fmt.Errorf("模块类型不能为空")
 	}
-	// 检查名称唯一性（同分组内）
+	// 检查名称全局唯一性
 	var count int64
-	s.db.Model(&workflow.HookTemplate{}).Where("name = ? AND package_group = ?", t.Name, t.Source).Count(&count)
+	s.db.Model(&workflow.HookTemplate{}).Where("name = ?", t.Name).Count(&count)
 	if count > 0 {
-		return fmt.Errorf("钩子名称「%s」在当前分组已存在", t.Name)
+		return fmt.Errorf("钩子名称「%s」已存在", t.Name)
 	}
 	return s.db.Create(t).Error
 }
@@ -55,11 +51,11 @@ func (s *Service) UpdateHookTemplate(id uint, t *workflow.HookTemplate) error {
 	if t.Module == "" {
 		return fmt.Errorf("模块类型不能为空")
 	}
-	// 检查名称唯一性（同分组内，排除自身）
+	// 检查名称全局唯一性（排除自身）
 	var count int64
-	s.db.Model(&workflow.HookTemplate{}).Where("name = ? AND package_group = ? AND id != ?", t.Name, t.Source, id).Count(&count)
+	s.db.Model(&workflow.HookTemplate{}).Where("name = ? AND id != ?", t.Name, id).Count(&count)
 	if count > 0 {
-		return fmt.Errorf("钩子名称「%s」在当前分组已存在", t.Name)
+		return fmt.Errorf("钩子名称「%s」已存在", t.Name)
 	}
 	return s.db.Model(&workflow.HookTemplate{}).Where("id = ?", id).Updates(t).Error
 }

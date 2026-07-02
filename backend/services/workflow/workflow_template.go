@@ -8,14 +8,10 @@ import (
 
 // ==================== WorkflowTemplate CRUD ====================
 
-// ListWorkflowTemplates 获取工作流模板文件（支持按分组过滤）
-func (s *Service) ListWorkflowTemplates(packageGroup string) ([]workflow.WorkflowTemplate, error) {
+// ListWorkflowTemplates 获取工作流模板文件
+func (s *Service) ListWorkflowTemplates() ([]workflow.WorkflowTemplate, error) {
 	var templates []workflow.WorkflowTemplate
-	query := s.db.Order("created_at DESC")
-	if packageGroup != "" {
-		query = query.Where("package_group = ?", packageGroup)
-	}
-	if err := query.Find(&templates).Error; err != nil {
+	if err := s.db.Order("created_at DESC").Find(&templates).Error; err != nil {
 		return nil, err
 	}
 	return templates, nil
@@ -35,11 +31,11 @@ func (s *Service) CreateWorkflowTemplate(t *workflow.WorkflowTemplate) error {
 	if t.Name == "" {
 		return fmt.Errorf("模板名称不能为空")
 	}
-	// 检查名称唯一性（同分组内）
+	// 检查名称全局唯一性
 	var count int64
-	s.db.Model(&workflow.WorkflowTemplate{}).Where("name = ? AND package_group = ?", t.Name, t.Source).Count(&count)
+	s.db.Model(&workflow.WorkflowTemplate{}).Where("name = ?", t.Name).Count(&count)
 	if count > 0 {
-		return fmt.Errorf("模板名称「%s」在当前分组已存在", t.Name)
+		return fmt.Errorf("模板名称「%s」已存在", t.Name)
 	}
 	return s.db.Create(t).Error
 }
@@ -49,11 +45,11 @@ func (s *Service) UpdateWorkflowTemplate(id uint, t *workflow.WorkflowTemplate) 
 	if t.Name == "" {
 		return fmt.Errorf("模板名称不能为空")
 	}
-	// 检查名称唯一性（同分组内，排除自身）
+	// 检查名称全局唯一性（排除自身）
 	var count int64
-	s.db.Model(&workflow.WorkflowTemplate{}).Where("name = ? AND package_group = ? AND id != ?", t.Name, t.Source, id).Count(&count)
+	s.db.Model(&workflow.WorkflowTemplate{}).Where("name = ? AND id != ?", t.Name, id).Count(&count)
 	if count > 0 {
-		return fmt.Errorf("模板名称「%s」在当前分组已存在", t.Name)
+		return fmt.Errorf("模板名称「%s」已存在", t.Name)
 	}
 	return s.db.Model(&workflow.WorkflowTemplate{}).Where("id = ?", id).Updates(t).Error
 }

@@ -70,8 +70,7 @@ func ListStageTemplates(c *gin.Context) {
 		return
 	}
 
-	packageGroup := c.Query("source")
-	templates, err := WorkflowService.ListStageTemplates(packageGroup)
+	templates, err := WorkflowService.ListStageTemplates()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "message": "系统内部错误"})
 		return

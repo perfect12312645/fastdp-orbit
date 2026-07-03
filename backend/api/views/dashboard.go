@@ -77,13 +77,15 @@ func GetDashboardStats(c *gin.Context) {
 	db.Preload("Workflow").Order("created_at DESC").Limit(10).Find(&execs)
 	for _, e := range execs {
 		re := RecentExecution{
-			ID:           e.ID,
-			WorkflowName: e.Workflow.Name,
-			Status:       e.Status,
-			Trigger:      e.Trigger,
-			StartedAt:    e.StartedAt.Format("2006-01-02 15:04:05"),
+			ID:         e.ID,
+			Status:     e.Status,
+			Trigger:    e.Trigger,
+			StartedAt:  e.StartedAt.Format("2006-01-02 15:04:05"),
 		}
-		if !e.FinishedAt.IsZero() {
+		if e.Workflow != nil {
+			re.WorkflowName = e.Workflow.Name
+		}
+		if e.FinishedAt != nil && !e.FinishedAt.IsZero() {
 			re.FinishedAt = e.FinishedAt.Format("2006-01-02 15:04:05")
 			re.Duration = e.FinishedAt.Sub(e.StartedAt).Milliseconds()
 		}

@@ -3,10 +3,12 @@ package database
 import (
 	"fastdp-orbit/backend/config"
 	"fastdp-orbit/backend/database/migrations"
+	"fastdp-orbit/backend/models/common"
 	"fastdp-orbit/backend/pkg/logger"
 
 	"github.com/glebarez/sqlite"
 	"go.uber.org/zap"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 	"moul.io/zapgorm2"
 )
@@ -48,10 +50,43 @@ func Init(cfg config.DatabaseConfig) (*gorm.DB, error) {
 		return nil, err
 	}
 
+	// 初始化默认管理员用户
+	seedDefaultAdmin(DB)
+
 	return DB, nil
 }
 
 // GetDB returns the database instance
 func GetDB() *gorm.DB {
 	return DB
+}
+
+// seedDefaultAdmin 初始化默认管理员
+func seedDefaultAdmin(db *gorm.DB) {
+	var count int64
+	db.Model(&common.User{}).Count(&count)
+	if count > 0 {
+		return
+	}
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte("admin123"), bcrypt.DefaultCost)
+	if err != nil {
+		logger.Error("生成默认管理员密码失败", zap.Error(err))
+		return
+	}
+
+	admin := common.User{
+		Username:      "admin",
+		Password:      string(hashedPassword),
+		Nickname:      "管理员",
+		Role:          "admin",
+		MustChangePwd: true,
+	}
+
+	if err := db.Create(&admin).Error; err != nil {
+		logger.Error("创建默认管理员失败", zap.Error(err))
+		return
+	}
+
+	logger.Info("默认管理员已创建（用户名: admin, 密码: admin123）")
 }

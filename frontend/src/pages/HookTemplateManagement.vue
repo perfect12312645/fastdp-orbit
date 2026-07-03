@@ -20,7 +20,7 @@
               <Icon icon="mdi:magnify" :size="16" />
             </template>
           </el-input>
-          <el-select v-model="selectedGroup" placeholder="全部分组" clearable style="width: 160px;">
+          <el-select v-model="selectedGroup" placeholder="全部来源" clearable style="width: 160px;">
             <el-option v-for="g in availableGroups" :key="g" :label="g || '(默认)'" :value="g" />
           </el-select>
         </div>
@@ -29,14 +29,14 @@
         </div>
       </div>
 
-      <el-table :data="filteredTemplates" v-loading="loading" stripe>
+      <el-table :data="paginatedTemplates" v-loading="loading" stripe>
         <el-table-column label="名称" prop="name" min-width="150" />
         <el-table-column label="模块" prop="module" width="120">
           <template #default="{ row }">
             <el-tag size="small" effect="plain">{{ row.module }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="分组" width="120">
+        <el-table-column label="来源" width="120">
           <template #default="{ row }">
             <el-tag v-if="row.source" size="small" type="info" effect="plain">{{ row.source }}</el-tag>
             <span v-else class="text-muted">-</span>
@@ -64,6 +64,17 @@
           </template>
         </el-table-column>
       </el-table>
+
+      <div class="pagination-wrapper" v-if="filteredTemplates.length > pageSize">
+        <el-pagination
+          v-model:current-page="currentPage"
+          v-model:page-size="pageSize"
+          :page-sizes="[10, 20, 50]"
+          :total="filteredTemplates.length"
+          layout="total, sizes, prev, pager, next"
+          @size-change="currentPage = 1"
+        />
+      </div>
     </div>
 
     <!-- 创建/编辑对话框 -->
@@ -242,6 +253,8 @@ const loading = ref(false)
 const searchText = ref('')
 const selectedGroup = ref('')
 const templates = ref<HookTemplate[]>([])
+const currentPage = ref(1)
+const pageSize = ref(20)
 
 const dialogVisible = ref(false)
 const editingId = ref(0)
@@ -286,6 +299,10 @@ watch(() => form.value.module, (mod) => {
   formParams.value = newParams
 })
 
+watch([searchText, selectedGroup], () => {
+  currentPage.value = 1
+})
+
 const filteredTemplates = computed(() => {
   let result = templates.value
   if (selectedGroup.value) {
@@ -303,6 +320,11 @@ const filteredTemplates = computed(() => {
 const availableGroups = computed(() => {
   const groups = new Set(templates.value.map(t => t.source).filter(Boolean))
   return Array.from(groups).sort()
+})
+
+const paginatedTemplates = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  return filteredTemplates.value.slice(start, start + pageSize.value)
 })
 
 async function loadData() {
@@ -487,5 +509,10 @@ onMounted(loadData)
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.pagination-wrapper {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
 }
 </style>

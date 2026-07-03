@@ -109,7 +109,7 @@
     </div>
 
     <!-- 创建方案 - 全屏对话框 -->
-    <el-dialog v-model="createDialogVisible" fullscreen :close-on-click-modal="false" destroy-on-close>
+    <el-dialog v-model="createDialogVisible" fullscreen :close-on-click-modal="false" destroy-on-close :show-close="false">
       <template #header>
         <div class="create-header">
           <div class="create-header-left">
@@ -825,6 +825,15 @@ onMounted(loadData)
 </script>
 
 <style scoped>
+.page-subtitle {
+  font-size: var(--font-size-sm);
+  color: var(--text-color-secondary);
+  margin-top: 4px;
+}
+.header-actions {
+  display: flex;
+  gap: 8px;
+}
 .package-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));

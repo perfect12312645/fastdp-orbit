@@ -9,7 +9,7 @@ export function loginApi(data: LoginParams): Promise<ApiResponse<LoginResult>> {
 
 /** 获取当前用户信息 */
 export function getUserInfoApi(): Promise<ApiResponse<UserInfo>> {
-  return request.post('/auth/userinfo').then((res) => res.data)
+  return request.get('/auth/user-info').then((res) => res.data)
 }
 
 /** 退出登录 */
@@ -18,6 +18,11 @@ export function logoutApi(): Promise<ApiResponse<null>> {
 }
 
 /** 修改密码 */
-export function changePasswordApi(data: { oldPassword: string; newPassword: string }): Promise<ApiResponse<null>> {
-  return request.post('/auth/changePassword', data).then((res) => res.data)
+export function changePasswordApi(data: { old_password: string; new_password: string }): Promise<ApiResponse<null>> {
+  return request.post('/auth/change-password', data).then((res) => res.data)
+}
+
+/** 更新个人信息 */
+export function updateProfileApi(data: { nickname: string; email: string }): Promise<ApiResponse<null>> {
+  return request.put('/auth/profile', data).then((res) => res.data)
 }

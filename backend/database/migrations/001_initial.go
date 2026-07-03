@@ -23,6 +23,7 @@ func InitialMigration(db *gorm.DB) error {
 		// Common
 		&common.Template{},
 		&common.Cluster{},
+		&common.User{},
 		&common.AuditLog{},
 		// Workflow - 定义层
 		&workflow.Workflow{},

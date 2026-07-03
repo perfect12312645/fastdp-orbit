@@ -20,7 +20,7 @@
                 <Icon icon="mdi:magnify" :size="16" />
               </template>
             </el-input>
-            <el-select v-model="selectedGroup" placeholder="全部分组" clearable style="width: 160px;">
+            <el-select v-model="selectedGroup" placeholder="全部来源" clearable style="width: 160px;">
               <el-option v-for="g in availableGroups" :key="g" :label="g || '(默认)'" :value="g" />
             </el-select>
           </div>
@@ -29,10 +29,10 @@
           </div>
         </div>
 
-        <el-table :data="filteredTemplates" v-loading="loading" stripe>
+        <el-table :data="paginatedTemplates" v-loading="loading" stripe>
           <el-table-column label="名称" prop="name" min-width="150" />
           <el-table-column label="描述" prop="description" min-width="200" show-overflow-tooltip />
-          <el-table-column label="分组" width="120">
+          <el-table-column label="来源" width="120">
             <template #default="{ row }">
               <el-tag v-if="row.source" size="small" type="info" effect="plain">{{ row.source }}</el-tag>
               <span v-else class="text-muted">-</span>
@@ -57,6 +57,17 @@
           </template>
         </el-table-column>
       </el-table>
+
+      <div class="pagination-wrapper" v-if="filteredTemplates.length > pageSize">
+        <el-pagination
+          v-model:current-page="currentPage"
+          v-model:page-size="pageSize"
+          :page-sizes="[10, 20, 50]"
+          :total="filteredTemplates.length"
+          layout="total, sizes, prev, pager, next"
+          @size-change="currentPage = 1"
+        />
+      </div>
     </div>
 
     <!-- 全屏编辑对话框 -->
@@ -64,6 +75,7 @@
       v-model="dialogVisible"
       fullscreen
       destroy-on-close
+      :show-close="false"
       class="template-editor-dialog"
     >
       <template #header>
@@ -254,7 +266,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { Icon } from '@iconify/vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Codemirror } from 'vue-codemirror'
@@ -281,6 +293,8 @@ const selectedGroup = ref('')
 const templates = ref<WorkflowTemplate[]>([])
 const globalVars = ref<GlobalVariable[]>([])
 const machineGroups = ref<MachineGroup[]>([])
+const currentPage = ref(1)
+const pageSize = ref(20)
 
 const filteredTemplates = computed(() => {
   let result = templates.value
@@ -299,6 +313,15 @@ const filteredTemplates = computed(() => {
 const availableGroups = computed(() => {
   const groups = new Set(templates.value.map(t => t.source).filter(Boolean))
   return Array.from(groups).sort()
+})
+
+const paginatedTemplates = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  return filteredTemplates.value.slice(start, start + pageSize.value)
+})
+
+watch([searchText, selectedGroup], () => {
+  currentPage.value = 1
 })
 
 const machineGroupsForPicker = computed(() => {
@@ -588,6 +611,15 @@ onMounted(loadData)
 </script>
 
 <style scoped>
+.page-subtitle {
+  font-size: var(--font-size-sm);
+  color: var(--text-color-secondary);
+  margin-top: 4px;
+}
+.header-actions {
+  display: flex;
+  gap: 8px;
+}
 .template-editor-dialog :deep(.el-dialog__body) {
   padding: 0;
   height: calc(100vh - 106px);
@@ -770,5 +802,10 @@ onMounted(loadData)
   color: var(--el-text-color-placeholder);
   padding: 40px;
   font-size: 13px;
+}
+.pagination-wrapper {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
 }
 </style>

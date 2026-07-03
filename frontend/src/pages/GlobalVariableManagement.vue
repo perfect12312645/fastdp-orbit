@@ -85,11 +85,11 @@
         </el-table-column>
       </el-table>
 
-      <div class="pagination-wrapper" v-if="filteredVars.length > 20">
+      <div class="pagination-wrapper" v-if="filteredVars.length > pageSize">
         <el-pagination
           v-model:current-page="currentPage"
           v-model:page-size="pageSize"
-          :page-sizes="[20, 50, 100]"
+          :page-sizes="[10, 20, 50]"
           :total="filteredVars.length"
           layout="total, sizes, prev, pager, next"
           @size-change="currentPage = 1"

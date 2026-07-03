@@ -24,6 +24,12 @@ export interface LoginResult {
   user: UserInfo
 }
 
+/** 修改密码请求 */
+export interface ChangePasswordParams {
+  old_password: string
+  new_password: string
+}
+
 /** 用户信息 */
 export interface UserInfo {
   id: number
@@ -32,7 +38,8 @@ export interface UserInfo {
   avatar: string
   role: string
   email: string
-  lastLoginAt: string
+  must_change_pwd: boolean
+  last_login_at: string | null
 }
 
 /** 节点信息 */

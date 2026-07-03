@@ -33,7 +33,7 @@
 
         <div class="stage-cards" v-loading="loading">
           <div
-            v-for="stage in filteredStages"
+            v-for="stage in paginatedStages"
             :key="stage.id"
             class="stage-card"
           >
@@ -87,6 +87,17 @@
             <p>暂无阶段模板</p>
             <el-button type="primary" @click="showCreateEditor">创建阶段</el-button>
           </div>
+        </div>
+
+        <div class="pagination-wrapper" v-if="filteredStages.length > pageSize">
+          <el-pagination
+            v-model:current-page="currentPage"
+            v-model:page-size="pageSize"
+            :page-sizes="[10, 20, 50]"
+            :total="filteredStages.length"
+            layout="total, sizes, prev, pager, next"
+            @size-change="currentPage = 1"
+          />
         </div>
       </div>
     </template>
@@ -533,23 +544,14 @@
                     <el-row :gutter="16">
                       <el-col :span="8">
                         <el-form-item label="后置钩子" class="task-field">
-                          <el-select
+                          <el-select-v2
                             v-model="task.hooks_array"
+                            :options="hookTemplateOptions"
                             multiple
                             placeholder="选择钩子模板"
                             style="width: 100%"
                             filterable
-                          >
-                            <el-option
-                              v-for="ht in hookTemplates"
-                              :key="ht.id"
-                              :label="ht.name"
-                              :value="ht.name"
-                            >
-                              <span>{{ ht.name }}</span>
-                              <span style="float: right; color: var(--el-text-color-secondary); font-size: 12px">{{ ht.module }}</span>
-                            </el-option>
-                          </el-select>
+                          />
                         </el-form-item>
                       </el-col>
                       <el-col :span="8">
@@ -1012,6 +1014,8 @@ const machineGroups = ref<MachineGroup[]>([])
 const machineGroupLoading = ref(false)
 const hookTemplates = ref<HookTemplate[]>([])
 const workflowTemplates = ref<WorkflowTemplate[]>([])
+const currentPage = ref(1)
+const pageSize = ref(10)
 
 // 视图模式
 const viewMode = ref<'list' | 'edit' | 'versions'>('list')
@@ -1271,6 +1275,22 @@ const filteredStages = computed(() => {
 const stageSources = computed(() => {
   const groups = new Set(stages.value.map(s => s.source).filter(Boolean))
   return Array.from(groups).sort()
+})
+
+const hookTemplateOptions = computed(() =>
+  hookTemplates.value.map(ht => ({
+    value: ht.name,
+    label: `${ht.name} (${ht.module})`,
+  }))
+)
+
+const paginatedStages = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  return filteredStages.value.slice(start, start + pageSize.value)
+})
+
+watch([searchText, selectedSource], () => {
+  currentPage.value = 1
 })
 
 function normalizeTasks(rawTasks: any[]): StageTask[] {
@@ -1819,6 +1839,11 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+.pagination-wrapper {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
 }
 
 .stage-card {

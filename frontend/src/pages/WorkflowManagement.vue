@@ -27,13 +27,13 @@
       </div>
 
       <el-table :data="paginatedData" v-loading="loading" stripe style="width: 100%">
-        <el-table-column prop="name" label="名称" width="120">
+        <el-table-column prop="name" label="名称" width="150">
           <template #default="{ row }">
             <span class="link-text" @click="openCanvas(row)">{{ row.name }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="description" label="描述" min-width="120" show-overflow-tooltip />
-        <el-table-column prop="created_by" label="创建人" width="120" />
+        <el-table-column prop="description" label="描述" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="created_by" label="创建人" width="100" />
         <el-table-column prop="created_at" label="创建时间" width="180">
           <template #default="{ row }">
             {{ formatDateTime(row.created_at) }}

@@ -57,13 +57,6 @@
             <Icon :icon="appStore.theme === 'light' ? 'mdi:weather-night' : 'mdi:weather-sunny'" :size="18" />
           </div>
 
-          <!-- 通知 -->
-          <el-badge :value="3" :max="99" class="notification-badge">
-            <div class="topbar-action">
-              <Icon icon="mdi:bell-outline" :size="18" />
-            </div>
-          </el-badge>
-
           <!-- 用户信息 -->
           <el-dropdown trigger="click" @command="handleUserCommand">
             <div class="user-info">
@@ -103,7 +96,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Icon } from '@iconify/vue'
 import { useAppStore } from '@/stores/app'
@@ -115,6 +108,13 @@ const appStore = useAppStore()
 const authStore = useAuthStore()
 
 const isFullscreen = ref(false)
+
+// 刷新页面后重新加载用户信息（token 还在 localStorage 但 Pinia 状态丢失）
+onMounted(() => {
+  if (authStore.isLoggedIn && !authStore.userInfo) {
+    authStore.fetchUserInfo()
+  }
+})
 
 const menuItems = [
   { path: '/dashboard', title: '仪表盘', icon: 'mdi:view-dashboard-outline' },

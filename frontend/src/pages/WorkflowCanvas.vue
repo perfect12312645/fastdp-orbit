@@ -13,9 +13,15 @@
             placeholder="工作流名称"
             class="workflow-name-input"
           />
+          <el-input
+            v-model="workflow.description"
+            placeholder="工作流描述（可选）"
+            class="workflow-desc-input"
+          />
         </template>
         <template v-else>
           <span class="workflow-title">{{ workflow.name }}</span>
+          <span v-if="workflow.description" class="workflow-desc">{{ workflow.description }}</span>
         </template>
         <template v-if="!editMode && lastSaved">
           <span class="save-status saved">已保存 {{ lastSaved }}</span>
@@ -38,6 +44,9 @@
         <template v-if="editMode">
           <el-button @click="exitEditMode">
             <Icon icon="mdi:cancel" :size="16" /> 取消
+          </el-button>
+          <el-button type="warning" @click="updateAllStages">
+            <Icon icon="mdi:sync" :size="16" /> 更新所有阶段
           </el-button>
           <el-button type="primary" @click="handleSave" :loading="saving">
             <Icon icon="mdi:content-save" :size="16" /> 保存
@@ -159,6 +168,9 @@
                       <div class="stage-card-meta">
                         <el-tag size="small" effect="plain">{{ stage.machine_group_name || '未指定' }}</el-tag>
                         <span class="stage-task-count">{{ stage.tasks.length }} 个任务</span>
+                        <el-tooltip v-if="isStageOutdated(stage)" content="模板已更新，可点击「更新所有阶段」同步" placement="top">
+                          <el-tag size="small" type="warning" effect="plain" class="update-dot">可更新</el-tag>
+                        </el-tooltip>
                         <el-tag v-if="stage.template_version" size="small" type="info" effect="plain" class="version-tag">
                           {{ stage.template_version }}
                         </el-tag>
@@ -181,7 +193,16 @@
                   <div class="stage-card-header">
                     <Icon :icon="getStageStatusIcon(gi, si)" :size="16" :class="'status-' + (getStageStatus(gi, si) || 'pending')" />
                     <span class="stage-card-name">{{ stage.name || '未命名' }}</span>
-                    <el-tag v-if="stage.template_version" size="small" type="info" effect="plain" class="version-tag">
+                    <el-tooltip v-if="isStageOutdated(stage)" content="模板已更新，可点击「更新所有阶段」同步" placement="top">
+                      <el-tag size="small" type="warning" effect="plain" class="update-dot">可更新</el-tag>
+                    </el-tooltip>
+                    <el-tag
+                      v-if="stage.template_version"
+                      :type="isStageOutdated(stage) ? 'warning' : 'info'"
+                      :effect="isStageOutdated(stage) ? 'dark' : 'plain'"
+                      size="small"
+                      class="version-tag"
+                    >
                       {{ stage.template_version }}
                     </el-tag>
                     <el-button
@@ -965,6 +986,74 @@ function refreshTemplates() {
   ElMessage.success('已刷新')
 }
 
+// 按名称映射模板，用于版本比对
+const templateByName = computed(() => {
+  const map: Record<string, StageTemplateApi> = {}
+  for (const tpl of templates.value) {
+    map[tpl.name] = tpl
+  }
+  return map
+})
+
+/** 检查阶段是否有版本更新 */
+function isStageOutdated(stage: WorkflowStage): boolean {
+  if (!stage.template_version || !stage.name) return false
+  const tpl = templateByName.value[stage.name]
+  if (!tpl) return false
+  return stage.template_version !== tpl.version
+}
+
+/** 获取模板最新版本号 */
+function getTemplateLatestVersion(stageName: string): string {
+  return templateByName.value[stageName]?.version || ''
+}
+
+/** 将单个阶段更新为模板最新版本 */
+function updateStageFromTemplate(stage: WorkflowStage) {
+  const tpl = templateByName.value[stage.name]
+  if (!tpl || !isStageOutdated(stage)) return
+  try {
+    const rawTasks = JSON.parse(tpl.tasks || '[]') as any[]
+    stage.tasks = rawTasks.map((t: any, i: number) => ({
+      ref: 0,
+      name: t.name || '',
+      module: t.module || 'shell',
+      params: typeof t.params === 'object' ? JSON.stringify(t.params) : (t.params || ''),
+      order: i + 1,
+      when: t.when || '',
+      hooks: t.hooks || '',
+      loop: t.loop || '',
+      timeout: t.timeout || 0,
+      ignore_errors: t.ignore_errors ?? false,
+      retries: t.retries || 0,
+      delay: t.delay || 0,
+      register: t.register || '',
+    }))
+    stage.template_version = tpl.version
+    stage.machine_group_id = tpl.machine_group_id
+  } catch {
+    // ignore parse error
+  }
+}
+
+/** 一键更新所有过时阶段 */
+function updateAllStages() {
+  let count = 0
+  for (const group of workflow.value.stage_groups) {
+    for (const stage of group.stages) {
+      if (isStageOutdated(stage)) {
+        updateStageFromTemplate(stage)
+        count++
+      }
+    }
+  }
+  if (count > 0) {
+    ElMessage.success(`已更新 ${count} 个阶段，请保存工作流生效`)
+  } else {
+    ElMessage.info('所有阶段已是最新版本')
+  }
+}
+
 function onTemplateDragStart(e: DragEvent, tpl: StageTemplateApi) {
   e.dataTransfer?.setData('application/json', JSON.stringify(tpl))
   e.dataTransfer!.effectAllowed = 'copy'
@@ -1250,6 +1339,33 @@ onUnmounted(() => {
 .workflow-name-input :deep(.el-input__inner):focus {
   border-bottom: 2px solid var(--el-color-primary);
   border-radius: 0;
+}
+
+.workflow-desc-input {
+  width: 200px;
+  margin-left: 8px;
+}
+
+.workflow-desc-input :deep(.el-input__inner) {
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+  border: none;
+  background: transparent;
+}
+
+.workflow-desc-input :deep(.el-input__inner):focus {
+  border-bottom: 1px solid var(--el-color-primary);
+  border-radius: 0;
+}
+
+.workflow-desc {
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+  margin-left: 8px;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .save-status {
@@ -1584,6 +1700,13 @@ onUnmounted(() => {
 
 .version-tag {
   margin-left: auto;
+}
+
+.update-dot {
+  font-size: 11px;
+  padding: 0 6px;
+  height: 18px;
+  margin-left: 4px;
 }
 
 .stage-duration {

@@ -189,3 +189,11 @@ func EnsureServerConfig(cfg *config.CLIConfig) error {
 	}
 	return nil
 }
+
+// EnsureAuth 确保已登录（供需要认证的命令使用）
+func EnsureAuth(cfg *config.CLIConfig) error {
+	if cfg.Auth.Token == "" {
+		return fmt.Errorf("未登录，请先运行: orbitctl login <username>")
+	}
+	return nil
+}

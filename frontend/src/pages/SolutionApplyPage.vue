@@ -1,5 +1,5 @@
 <template>
-  <el-dialog v-model="visible" fullscreen :close-on-click-modal="false" destroy-on-close @close="handleClose" class="apply-dialog">
+  <el-dialog v-model="visible" fullscreen :close-on-click-modal="false" destroy-on-close :show-close="false" @close="handleClose" class="apply-dialog">
     <template #header>
       <div class="apply-header">
         <Icon icon="mdi:play-circle-outline" :size="20" />
@@ -79,23 +79,36 @@
 
         <el-table v-else :data="machineGroups" size="small" border>
           <el-table-column label="分组名称" prop="name" width="180" />
-          <el-table-column label="关联机器" min-width="350">
+          <el-table-column label="描述" min-width="200">
             <template #default="{ row }">
-              <el-select
-                v-model="row.machineIds"
-                placeholder="选择机器（多选）"
-                multiple
-                clearable
-                filterable
-                style="width: 100%"
-              >
-                <el-option
-                  v-for="m in allMachines"
-                  :key="m.id"
-                  :label="`${m.hostname || m.ip} (${m.ip}:${m.port})`"
-                  :value="m.id"
+              <span v-if="row.description" style="color: var(--el-text-color-secondary); font-size: 12px;">{{ row.description }}</span>
+              <span v-else style="color: var(--el-text-color-placeholder); font-size: 12px;">-</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="关联机器" min-width="300">
+            <template #default="{ row }">
+              <div style="width: 100%;">
+                <div style="margin-bottom: 8px; display: flex; gap: 8px;">
+                  <el-button size="small" @click="selectAllMachines(row)" :disabled="allMachines.length === 0">
+                    <Icon icon="mdi:checkbox-multiple-marked" :size="14" /> 全选
+                  </el-button>
+                  <el-button size="small" @click="row.machineIds = []" :disabled="!row.machineIds?.length">
+                    <Icon icon="mdi:checkbox-multiple-blank-outline" :size="14" /> 清空
+                  </el-button>
+                  <span style="font-size: 12px; color: var(--el-text-color-secondary); line-height: 28px;">
+                    已选 {{ row.machineIds?.length || 0 }} / {{ allMachines.length }}
+                  </span>
+                </div>
+                <el-select-v2
+                  v-model="row.machineIds"
+                  :options="machineOptions"
+                  multiple
+                  filterable
+                  placeholder="输入关键词搜索机器"
+                  style="width: 100%"
+                  :loading="machineLoading"
                 />
-              </el-select>
+              </div>
             </template>
           </el-table-column>
           <el-table-column label="已选机器数" width="120">
@@ -158,12 +171,14 @@
       <div v-show="currentStep === 3" class="tab-content">
         <div class="tab-header">
           <h3>依赖文件</h3>
-          <div class="tab-actions">
-            <el-button size="small" @click="downloadAllFiles" :loading="downloadingAll">
-              <Icon icon="mdi:download" :size="14" /> 批量下载全部
-            </el-button>
-          </div>
         </div>
+        <el-alert
+          title="执行工作流前需要确保以下依赖文件已上传至文件存储库"
+          type="warning"
+          :closable="false"
+          show-icon
+          class="mb-16"
+        />
 
         <div v-if="!files.length" class="empty-state">
           <Icon icon="mdi:file-outline" :size="48" style="color: var(--el-text-color-secondary)" />
@@ -172,29 +187,10 @@
 
         <el-table v-else :data="files" size="small" border>
           <el-table-column label="文件名" prop="name" min-width="200" />
-          <el-table-column label="大小" width="100">
+          <el-table-column label="大小" width="120">
             <template #default="{ row }">{{ formatFileSize(row.size) }}</template>
           </el-table-column>
-          <el-table-column label="MD5" prop="md5" min-width="160" />
-          <el-table-column label="状态" width="100">
-            <template #default="{ row }">
-              <el-tag :type="fileStatusType(row._status)" size="small">{{ fileStatusText(row._status) }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="200">
-            <template #default="{ row }">
-              <el-button size="small" @click="downloadFile(row)" :disabled="row._status === 'downloaded'">
-                {{ row.download_url ? '从公网下载' : '下载' }}
-              </el-button>
-              <el-upload
-                :auto-upload="false"
-                :show-file-list="false"
-                :on-change="(f: any) => handleUpload(row, f)"
-              >
-                <el-button size="small">上传</el-button>
-              </el-upload>
-            </template>
-          </el-table-column>
+          <el-table-column label="MD5" prop="md5" min-width="180" />
         </el-table>
       </div>
     </div>
@@ -224,10 +220,12 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { Icon } from '@iconify/vue'
 import { ElMessage } from 'element-plus'
-import { applySolutionLibraryApi, downloadFileAPI, type ConflictResponse } from '@/api/solutionLibrary'
+import { applySolutionLibraryApi, type ConflictResponse } from '@/api/solutionLibrary'
+import { getMachinesApi, type MachineInfo } from '@/api/machine'
 
 interface MachineGroupItem {
   name: string
+  description: string
   machineIds: number[]
 }
 
@@ -235,8 +233,6 @@ interface FileItem {
   name: string
   size: number
   md5: string
-  download_url?: string
-  _status: 'pending' | 'downloaded' | 'uploaded'
 }
 
 const props = defineProps<{
@@ -258,7 +254,19 @@ const decisions = ref<Record<string, Record<string, string>>>({})
 
 // Machine groups
 const machineGroups = ref<MachineGroupItem[]>([])
-const allMachines = ref<any[]>([])
+const allMachines = ref<MachineInfo[]>([])
+const machineLoading = ref(false)
+
+const machineOptions = computed(() =>
+  allMachines.value.map((m) => ({
+    value: m.id,
+    label: `${m.hostname || m.ip} (${m.ip}:${m.port})`,
+  }))
+)
+
+function selectAllMachines(row: MachineGroupItem) {
+  row.machineIds = allMachines.value.map((m) => m.id)
+}
 
 // Variables
 const variableSearch = ref('')
@@ -275,7 +283,6 @@ watch([variableSearch, variableGroupFilter], () => {
 
 // Files
 const files = ref<FileItem[]>([])
-const downloadingAll = ref(false)
 
 const variableGroups = computed(() => {
   const groups = new Set(allVariables.value.map((v: any) => v.group).filter(Boolean))
@@ -330,9 +337,15 @@ async function loadSolutionDetail() {
 
     // Parse machine groups from stages and top-level machineGroups field
     const mgNames = new Set<string>()
+    const mgDescriptions: Record<string, string> = {}
     // 从顶层 machineGroups 字段读取
     for (const mg of pack.machineGroups || []) {
-      if (mg.name) mgNames.add(mg.name)
+      if (mg.name) {
+        mgNames.add(mg.name)
+        if (mg.description) {
+          mgDescriptions[mg.name] = mg.description
+        }
+      }
     }
     // 从阶段模板中引用的机器分组读取
     for (const st of pack.stages || []) {
@@ -349,12 +362,20 @@ async function loadSolutionDetail() {
 
     machineGroups.value = Array.from(mgNames).map(name => ({
       name,
+      description: mgDescriptions[name] || '',
       machineIds: []
     }))
 
     // 加载全量机器列表，预选同名分组的已有机器
-    const { getMachinesApi } = await import('@/api/machine')
-    allMachines.value = await getMachinesApi()
+    const machines = await getMachinesApi()
+    allMachines.value = machines.sort((a: MachineInfo, b: MachineInfo) => {
+      const ipA = a.ip.split('.').map(Number)
+      const ipB = b.ip.split('.').map(Number)
+      for (let i = 0; i < 4; i++) {
+        if (ipA[i] !== ipB[i]) return ipA[i] - ipB[i]
+      }
+      return 0
+    })
     const { getMachineGroupsApi } = await import('@/api/machineGroup')
     const groups = await getMachineGroupsApi()
     for (const mg of machineGroups.value) {
@@ -375,8 +396,6 @@ async function loadSolutionDetail() {
       name: m.name,
       size: m.size,
       md5: m.md5,
-      download_url: m.download_url,
-      _status: 'pending'
     }))
   } catch (e) {
     console.error('Failed to load solution detail', e)
@@ -428,66 +447,6 @@ function formatFileSize(bytes: number): string {
   const units = ['B', 'KB', 'MB', 'GB']
   const i = Math.floor(Math.log(bytes) / Math.log(1024))
   return (bytes / Math.pow(1024, i)).toFixed(1) + ' ' + units[i]
-}
-
-function fileStatusType(status: string) {
-  return status === 'downloaded' ? 'success' : status === 'uploaded' ? 'warning' : 'info'
-}
-
-function fileStatusText(status: string) {
-  return status === 'downloaded' ? '已下载' : status === 'uploaded' ? '已上传' : '未下载'
-}
-
-function downloadFile(file: FileItem) {
-  const url = file.download_url
-  if (!url) {
-    ElMessage.warning('该文件无下载链接')
-    return
-  }
-  downloadFileAPI(url).then((blob) => {
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = file.name
-    a.click()
-    URL.revokeObjectURL(a.href)
-    file._status = 'downloaded'
-  }).catch(() => {
-    ElMessage.error(`下载 ${file.name} 失败`)
-  })
-}
-
-function downloadAllFiles() {
-  downloadingAll.value = true
-  const pendings = files.value.filter(f => f.download_url && f._status !== 'downloaded')
-  let done = 0
-  for (const f of pendings) {
-    downloadFileAPI(f.download_url!).then((blob) => {
-      const a = document.createElement('a')
-      a.href = URL.createObjectURL(blob)
-      a.download = f.name
-      a.click()
-      URL.revokeObjectURL(a.href)
-      f._status = 'downloaded'
-    }).catch(() => {
-      console.error(`Download failed: ${f.name}`)
-    }).finally(() => {
-      done++
-      if (done >= pendings.length) {
-        downloadingAll.value = false
-        ElMessage.success(`已下载 ${done} 个文件`)
-      }
-    })
-  }
-  if (pendings.length === 0) {
-    downloadingAll.value = false
-  }
-}
-
-function handleUpload(file: FileItem, uploadFile: any) {
-  if (uploadFile.raw) {
-    file._status = 'uploaded'
-    ElMessage.success(`文件 ${file.name} 已上传`)
-  }
 }
 
 async function handleApply() {

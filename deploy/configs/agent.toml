@@ -28,7 +28,7 @@ level = "info"
 # 输出方式: stdout, file, both
 output = "both"
 # 日志文件路径 (当output=file或both时生效)
-path = "./logs/agent.log"
+path = "/opt/fastdp-orbit/logs/agent.log"
 # 单个日志文件最大MB
 max_size = 100
 # 最多保留备份文件数

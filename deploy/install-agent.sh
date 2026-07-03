@@ -44,6 +44,9 @@ echo "Server: ${SERVER_IP}:${SERVER_PORT}"
 echo "Token: ${TOKEN:0:8}..."
 echo ""
 
+# 设置统一时区
+timedatectl set-timezone Asia/Shanghai
+
 # ==============================================
 # 步骤1：停止运行中的服务
 # ==============================================

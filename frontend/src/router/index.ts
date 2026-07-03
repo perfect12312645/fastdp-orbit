@@ -103,7 +103,7 @@ const router = createRouter({
 
 /** 路由守卫：未登录跳转登录页 */
 router.beforeEach((to, _from, next) => {
-  document.title = `${to.meta.title || '首页'} - fastdp-orbit`
+  document.title = `${to.meta.title || '首页'} - 多机可视化运维平台`
 
   if (to.meta.requiresAuth !== false && !isLoggedIn()) {
     next('/login')

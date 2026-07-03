@@ -26,12 +26,9 @@ type CLITLSConfig struct {
 	CACert                string `mapstructure:"ca-cert"`                  // CA证书路径
 }
 
-// CLIAuthConfig 认证配置（预留JWT）
+// CLIAuthConfig 认证配置（JWT token）
 type CLIAuthConfig struct {
-	AccessToken  string `mapstructure:"access-token"`
-	RefreshToken string `mapstructure:"refresh-token"`
-	ExpiresAt    string `mapstructure:"expires-at"`
-	User         string `mapstructure:"user"`
+	Token string `mapstructure:"token"`
 }
 
 // DefaultCLIConfig 返回默认CLI配置
@@ -133,10 +130,7 @@ func SaveCLIConfig(cfg *CLIConfig, configPath string) error {
 	v.Set("server.address", cfg.Server.Address)
 	v.Set("tls.insecure-skip-tls-verify", cfg.TLS.InsecureSkipTLSVerify)
 	v.Set("tls.ca-cert", cfg.TLS.CACert)
-	v.Set("auth.access-token", cfg.Auth.AccessToken)
-	v.Set("auth.refresh-token", cfg.Auth.RefreshToken)
-	v.Set("auth.expires-at", cfg.Auth.ExpiresAt)
-	v.Set("auth.user", cfg.Auth.User)
+	v.Set("auth.token", cfg.Auth.Token)
 
 	v.SetConfigFile(configPath)
 	if err := v.WriteConfigAs(configPath); err != nil {

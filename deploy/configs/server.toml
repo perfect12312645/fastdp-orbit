@@ -19,7 +19,7 @@ key_file = "/etc/fastdp-orbit/certs/server/http.key"
 # 数据库类型: sqlite, mysql, postgres
 type = "sqlite"
 # SQLite数据库路径
-path = "./data/fastdp-orbit.db"
+path = "/opt/fastdp-orbit/data/fastdp-orbit.db"
 # MySQL/PostgreSQL配置
 host = "localhost"
 port = 5432
@@ -50,7 +50,7 @@ level = "info"
 # 输出方式: stdout, file, both
 output = "both"
 # 日志文件路径 (当output=file或both时生效)
-path = "./logs/server.log"
+path = "/opt/fastdp-orbit/logs/server.log"
 # 单个日志文件最大MB
 max_size = 100
 # 最多保留备份文件数

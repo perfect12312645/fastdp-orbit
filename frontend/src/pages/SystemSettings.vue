@@ -26,18 +26,24 @@
                   <template #prefix><Icon icon="mdi:account-outline" :size="16" /></template>
                 </el-input>
               </el-form-item>
-              <el-form-item label="昵称">
+              <el-form-item
+                label="昵称"
+                :rules="[{ min: 1, max: 50, message: '昵称长度不超过50个字符', trigger: 'blur' }]"
+              >
                 <el-input v-model="profileForm.nickname" placeholder="请输入昵称">
                   <template #prefix><Icon icon="mdi:badge-account-outline" :size="16" /></template>
                 </el-input>
               </el-form-item>
-              <el-form-item label="邮箱">
+              <el-form-item
+                label="邮箱"
+                :rules="[{ type: 'email', message: '请输入正确的邮箱格式', trigger: 'blur' }]"
+              >
                 <el-input v-model="profileForm.email" placeholder="请输入邮箱">
                   <template #prefix><Icon icon="mdi:email-outline" :size="16" /></template>
                 </el-input>
               </el-form-item>
               <el-form-item>
-                <el-button type="primary">
+                <el-button type="primary" :loading="profileLoading" @click="handleSaveProfile">
                   <Icon icon="mdi:content-save-outline" :size="16" /> 保存修改
                 </el-button>
               </el-form-item>
@@ -54,26 +60,45 @@
           <div class="settings-form-wrapper">
             <div class="form-section">
               <h3 class="section-title">安全设置</h3>
-              <p class="section-desc">定期更换密码以保障账号安全</p>
+              <p class="section-desc">密码需至少 8 位，包含大小写字母和数字</p>
             </div>
-            <el-form :model="passwordForm" label-width="100px" class="settings-form">
-              <el-form-item label="当前密码">
-                <el-input v-model="passwordForm.oldPassword" type="password" show-password placeholder="请输入当前密码">
+            <el-form
+              ref="pwdFormRef"
+              :model="pwdForm"
+              :rules="pwdRules"
+              label-width="100px"
+              class="settings-form"
+            >
+              <el-form-item label="当前密码" prop="oldPassword">
+                <el-input v-model="pwdForm.oldPassword" type="password" show-password placeholder="请输入当前密码">
                   <template #prefix><Icon icon="mdi:key-outline" :size="16" /></template>
                 </el-input>
               </el-form-item>
-              <el-form-item label="新密码">
-                <el-input v-model="passwordForm.newPassword" type="password" show-password placeholder="请输入新密码">
+              <el-form-item label="新密码" prop="newPassword">
+                <el-input v-model="pwdForm.newPassword" type="password" show-password placeholder="请输入新密码">
                   <template #prefix><Icon icon="mdi:key-change" :size="16" /></template>
                 </el-input>
+                <!-- 密码强度 -->
+                <div v-if="pwdForm.newPassword" class="pwd-strength-bar">
+                  <el-progress
+                    :percentage="pwdStrengthLevel.percent"
+                    :color="pwdStrengthLevel.color"
+                    :stroke-width="6"
+                    :show-text="false"
+                    style="flex:1"
+                  />
+                  <span class="pwd-strength-text" :style="{ color: pwdStrengthLevel.color }">
+                    强度：{{ pwdStrengthLevel.text }}
+                  </span>
+                </div>
               </el-form-item>
-              <el-form-item label="确认密码">
-                <el-input v-model="passwordForm.confirmPassword" type="password" show-password placeholder="请再次输入新密码">
+              <el-form-item label="确认密码" prop="confirmPassword">
+                <el-input v-model="pwdForm.confirmPassword" type="password" show-password placeholder="请再次输入新密码">
                   <template #prefix><Icon icon="mdi:key-check" :size="16" /></template>
                 </el-input>
               </el-form-item>
               <el-form-item>
-                <el-button type="primary">
+                <el-button type="primary" :loading="pwdLoading" @click="handleChangePwd">
                   <Icon icon="mdi:lock-check-outline" :size="16" /> 修改密码
                 </el-button>
               </el-form-item>
@@ -145,26 +170,138 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { Icon } from '@iconify/vue'
-import { useAppStore } from '@/stores/app'
+import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage } from 'element-plus'
+import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
+import { updateProfileApi } from '@/api/auth'
 
 const appStore = useAppStore()
+const authStore = useAuthStore()
 const activeTab = ref('profile')
+const profileLoading = ref(false)
 
+// ============ 个人信息 ============
 const profileForm = reactive({
-  username: 'admin',
-  nickname: '管理员',
-  email: 'admin@example.com',
+  username: '',
+  nickname: '',
+  email: '',
 })
 
-const passwordForm = reactive({
+onMounted(() => {
+  if (authStore.userInfo) {
+    profileForm.username = authStore.userInfo.username || ''
+    profileForm.nickname = authStore.userInfo.nickname || ''
+    profileForm.email = authStore.userInfo.email || ''
+  }
+})
+
+async function handleSaveProfile() {
+  profileLoading.value = true
+  try {
+    await updateProfileApi({
+      nickname: profileForm.nickname,
+      email: profileForm.email,
+    })
+    // 更新 store 中的 userInfo
+    if (authStore.userInfo) {
+      authStore.userInfo.nickname = profileForm.nickname
+      authStore.userInfo.email = profileForm.email
+    }
+    ElMessage.success('保存成功')
+  } catch {
+    ElMessage.error('保存失败')
+  } finally {
+    profileLoading.value = false
+  }
+}
+
+// ============ 修改密码 ============
+const pwdFormRef = ref<FormInstance>()
+const pwdLoading = ref(false)
+const pwdForm = reactive({
   oldPassword: '',
   newPassword: '',
   confirmPassword: '',
 })
+const pwdRules: FormRules = {
+  oldPassword: [
+    { required: true, message: '请输入当前密码', trigger: 'blur' },
+  ],
+  newPassword: [
+    { required: true, message: '请输入新密码', trigger: 'blur' },
+    { min: 8, message: '密码长度不能少于8位', trigger: 'blur' },
+    {
+      validator: (_rule: any, value: string, callback: any) => {
+        if (!value) return callback()
+        if (!/[A-Z]/.test(value)) return callback(new Error('需包含至少一个大写字母'))
+        if (!/[a-z]/.test(value)) return callback(new Error('需包含至少一个小写字母'))
+        if (!/[0-9]/.test(value)) return callback(new Error('需包含至少一个数字'))
+        if (/[;&$\\|]/.test(value)) return callback(new Error('不能包含特殊字符 ; & $ \\ |'))
+        if (value === pwdForm.oldPassword) return callback(new Error('新密码不能与旧密码相同'))
+        callback()
+      },
+      trigger: 'blur',
+    },
+  ],
+  confirmPassword: [
+    { required: true, message: '请确认新密码', trigger: 'blur' },
+    {
+      validator: (_rule: any, value: string, callback: any) => {
+        if (value && value !== pwdForm.newPassword) {
+          return callback(new Error('两次输入的密码不一致'))
+        }
+        callback()
+      },
+      trigger: 'blur',
+    },
+  ],
+}
 
+const pwdStrength = computed(() => {
+  const pwd = pwdForm.newPassword
+  let score = 0
+  if (pwd.length >= 8) score += 25
+  if (/[A-Z]/.test(pwd)) score += 25
+  if (/[a-z]/.test(pwd)) score += 25
+  if (/[0-9]/.test(pwd)) score += 25
+  return score
+})
+
+const pwdStrengthLevel = computed(() => {
+  if (pwdStrength.value < 50) return { text: '弱', color: '#f56c6c', percent: pwdStrength.value }
+  if (pwdStrength.value < 75) return { text: '中', color: '#e6a23c', percent: pwdStrength.value }
+  return { text: '强', color: '#67c23a', percent: pwdStrength.value }
+})
+
+async function handleChangePwd() {
+  if (!pwdFormRef.value) return
+  try {
+    await pwdFormRef.value.validate()
+  } catch {
+    return
+  }
+  pwdLoading.value = true
+  try {
+    const { changePasswordApi } = await import('@/api/auth')
+    await changePasswordApi({
+      old_password: pwdForm.oldPassword,
+      new_password: pwdForm.newPassword,
+    })
+    ElMessage.success('密码修改成功')
+    pwdForm.oldPassword = ''
+    pwdForm.newPassword = ''
+    pwdForm.confirmPassword = ''
+  } catch (err: any) {
+    ElMessage.error(err?.message || '密码修改失败')
+  } finally {
+    pwdLoading.value = false
+  }
+}
+
+// ============ 主题 ============
 function handleThemeChange(val: string) {
   if (val === 'light' || val === 'dark') {
     appStore.toggleTheme()
@@ -233,6 +370,19 @@ function handleThemeChange(val: string) {
 
 .settings-form :deep(.el-input__wrapper) {
   border-radius: 8px;
+}
+
+/* 密码强度条 */
+.pwd-strength-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+}
+.pwd-strength-text {
+  font-size: 12px;
+  white-space: nowrap;
+  min-width: 80px;
 }
 
 /* ============ 主题卡片 ============ */

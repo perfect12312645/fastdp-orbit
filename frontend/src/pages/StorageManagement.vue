@@ -98,7 +98,12 @@
           </div>
           <el-progress :percentage="uploadPercent" :status="uploadPercent === 100 ? 'success' : ''" />
           <div class="progress-detail">
-            文件 {{ currentFileIndex + 1 }} / {{ selectedFiles.length }} · 分块 {{ currentChunk }} / {{ totalChunks }}
+            <span>文件 {{ currentFileIndex + 1 }} / {{ selectedFiles.length }} · 分块 {{ currentChunk }} / {{ totalChunks }}</span>
+          </div>
+          <div v-if="uploadSpeed > 0" class="progress-speed">
+            <span>速度: {{ formatSize(uploadSpeed) }}/s</span>
+            <span>已用: {{ uploadElapsed }}</span>
+            <span v-if="uploadPercent < 100">剩余: {{ uploadRemaining }}</span>
           </div>
         </div>
       </div>
@@ -147,6 +152,13 @@ const currentFileIndex = ref(0)
 
 const CHUNK_SIZE = 5 * 1024 * 1024 // 5MB
 
+// ==================== 上传速度相关 ====================
+const uploadSpeed = ref(0)        // 字节/秒
+const uploadElapsed = ref('00:00') // 已用时间
+const uploadRemaining = ref('')    // 预计剩余时间
+let uploadStartTime = 0
+let uploadedBytes = 0
+
 // ==================== 加载数据 ====================
 async function loadFiles() {
   loading.value = true
@@ -175,6 +187,9 @@ function showUploadDialog() {
   currentChunk.value = 0
   totalChunks.value = 0
   currentFileIndex.value = 0
+  uploadSpeed.value = 0
+  uploadElapsed.value = '00:00'
+  uploadRemaining.value = ''
   uploadDialogVisible.value = true
 }
 
@@ -193,6 +208,8 @@ async function startUpload() {
   if (selectedFiles.value.length === 0) return
 
   uploading.value = true
+  uploadStartTime = Date.now()
+  uploadedBytes = 0
 
   for (let i = 0; i < selectedFiles.value.length; i++) {
     currentFileIndex.value = i
@@ -251,6 +268,7 @@ async function uploadSingleFile(file: File) {
   }
 
   currentChunk.value = startChunk
+  const fileUploadStartTime = Date.now()
 
   // 分块上传
   while (currentChunk.value < totalChunks.value) {
@@ -266,11 +284,28 @@ async function uploadSingleFile(file: File) {
     )
 
     currentChunk.value++
+    uploadedBytes += chunk.size
     uploadPercent.value = Math.round((currentChunk.value / totalChunks.value) * 100)
+
+    // 计算速度和时间
+    const elapsed = (Date.now() - fileUploadStartTime) / 1000
+    if (elapsed > 0) {
+      uploadSpeed.value = (currentChunk.value * CHUNK_SIZE) / elapsed
+      uploadElapsed.value = formatDuration(elapsed)
+      
+      // 预计剩余时间
+      const remainingChunks = totalChunks.value - currentChunk.value
+      if (uploadSpeed.value > 0) {
+        const remaining = (remainingChunks * CHUNK_SIZE) / uploadSpeed.value
+        uploadRemaining.value = formatDuration(remaining)
+      }
+    }
   }
 
   uploadStatusText.value = '上传完成！'
   uploadPercent.value = 100
+  uploadSpeed.value = 0
+  uploadRemaining.value = ''
 }
 
 // ==================== 文件操作 ====================
@@ -313,6 +348,15 @@ function formatSize(bytes: number): string {
   return (bytes / Math.pow(1024, i)).toFixed(2) + ' ' + units[i]
 }
 
+function formatDuration(seconds: number): string {
+  if (seconds < 60) return `${Math.round(seconds)}秒`
+  const min = Math.floor(seconds / 60)
+  const sec = Math.round(seconds % 60)
+  if (min < 60) return `${min}分${sec}秒`
+  const hr = Math.floor(min / 60)
+  return `${hr}时${min % 60}分`
+}
+
 function formatDateTime(dateStr: string): string {
   if (!dateStr) return ''
   const d = new Date(dateStr)
@@ -333,6 +377,15 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.page-subtitle {
+  font-size: var(--font-size-sm);
+  color: var(--text-color-secondary);
+  margin-top: 4px;
+}
+.header-actions {
+  display: flex;
+  gap: 8px;
+}
 .upload-area {
   display: flex;
   flex-direction: column;
@@ -356,6 +409,14 @@ onMounted(() => {
   margin-top: 8px;
   font-size: 12px;
   color: var(--el-text-color-secondary);
+}
+
+.progress-speed {
+  display: flex;
+  gap: 16px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--el-text-color-regular);
 }
 
 .md5-text {

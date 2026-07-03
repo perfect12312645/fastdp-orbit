@@ -55,7 +55,6 @@ build-linux-arm64:
 
 package:
 	@echo "打包发布文件..."
-	# 前端产物
 	@mkdir -p $(RELEASE_AMD64)/dist $(RELEASE_ARM64)/dist
 	@cp -r $(FRONTEND_DIR)/dist/* $(RELEASE_AMD64)/dist/
 	@cp -r $(FRONTEND_DIR)/dist/* $(RELEASE_ARM64)/dist/
@@ -72,4 +71,5 @@ package:
 clean:
 	@echo "清理..."
 	@rm -rf $(RELEASE_DIR)
+	@rm -rf $(FRONTEND_DIR)/dist
 	@echo "清理完成"

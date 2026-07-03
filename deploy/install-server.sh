@@ -84,13 +84,13 @@ if [ ! -f "./${SERVER_BIN_NAME}" ]; then
     echo -e "${RED}错误：当前目录未找到 ${SERVER_BIN_NAME}${NC}"
     echo "请确保以下文件在当前目录："
     echo "  - ${SERVER_BIN_NAME}"
-    echo "  - server.toml"
+    echo "  - configs/server.toml"
     echo "  - ${SYSTEMD_SERVICE_NAME}"
     exit 1
 fi
 
-if [ ! -f "./server.toml" ]; then
-    echo -e "${RED}错误：当前目录未找到 server.toml${NC}"
+if [ ! -f "./configs/server.toml" ]; then
+    echo -e "${RED}错误：configs目录未找到 server.toml${NC}"
     exit 1
 fi
 
@@ -141,7 +141,7 @@ chmod +x "${SERVER_BIN_PATH}"
 echo "已复制: ${SERVER_BIN_NAME} -> ${SERVER_BIN_PATH}"
 
 # 复制配置文件
-cp "./server.toml" "${CONFIG_FILE}"
+cp "./configs/server.toml" "${CONFIG_FILE}"
 echo "已复制: server.toml -> ${CONFIG_FILE}"
 
 # 复制systemd服务文件
@@ -297,8 +297,8 @@ if [ -f "./install-agent.sh" ]; then
     echo "已复制: install-agent.sh -> ${STATIC_DIR}/"
 fi
 
-if [ -f "./agent.toml" ]; then
-    cp "./agent.toml" "${STATIC_DIR}/"
+if [ -f "./configs/agent.toml" ]; then
+    cp "./configs/agent.toml" "${STATIC_DIR}/"
     echo "已复制: agent.toml -> ${STATIC_DIR}/"
 fi
 

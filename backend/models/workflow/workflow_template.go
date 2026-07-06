@@ -1,0 +1,21 @@
+package workflow
+
+import (
+	"time"
+
+	"gorm.io/gorm"
+)
+
+// WorkflowTemplate 工作流模板文件（可复用的配置模板，供 Stage Template 编排时选取）
+type WorkflowTemplate struct {
+	ID          uint           `json:"id" gorm:"primaryKey"`
+	Name        string         `json:"name" gorm:"size:100;not null"`
+	Description string         `json:"description" gorm:"size:500"`
+	Content     string         `json:"content" gorm:"type:text"`                // Go template 语法内容
+	Source      string         `json:"source" gorm:"size:100;index;default:''"` // 来源（模板包名）
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+	DeletedAt   gorm.DeletedAt `json:"-" gorm:"index"`
+}
+
+func (WorkflowTemplate) TableName() string { return "workflow_templates" }

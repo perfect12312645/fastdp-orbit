@@ -1,0 +1,1007 @@
+apiVersion: orbit/v1
+kind: SolutionLibrary
+metadata:
+  name: k8s-destroy-1.32
+  description: Kubernetes集群完整销毁方案，逆向清理所有组件和配置
+  category: k8s
+  version: '1.0'
+  author: official
+globalVariables:
+  - key: main_data_dir
+    type: string
+    value: /data
+    description: K8s 主数据目录
+    group: storage
+  - key: etcd_data
+    type: string
+    value: /data/etcd
+    description: etcd 数据目录
+    group: storage
+  - key: kubelet_data
+    type: string
+    value: /data/kubelet
+    description: kubelet 数据目录
+    group: storage
+  - key: docker_data
+    type: string
+    value: /data/docker
+    description: docker 数据目录
+    group: storage
+  - key: docker_registry_data
+    type: string
+    value: /data/registry
+    description: registry 数据目录
+    group: storage
+  - key: repository_port
+    type: string
+    value: '9999'
+    description: 本地仓库端口
+    group: repo
+  - key: repository_dir
+    type: string
+    value: /data/cluster_deploy/repo
+    description: 仓库目录
+    group: repo
+  - key: base_pkg_dir
+    type: string
+    value: /data/cluster_deploy/base
+    description: 基础包目录
+    group: repo
+  - key: image_dir
+    type: string
+    value: /data/cluster_deploy/images
+    description: 镜像目录
+    group: repo
+  - key: repo_pkg
+    type: string
+    value: repo.tar.gz
+    description: 仓库包文件名
+    group: packages
+  - key: ubuntu_nginx_pkg
+    type: string
+    value: nginx-custom-1.28.0-amd64.tar.gz
+    description: Ubuntu nginx 包
+    group: packages
+  - key: nginx_rpm_pkg
+    type: string
+    value: nginx-custom-1.28.0-1.ky10.x86_64.rpm
+    description: nginx RPM 包
+    group: packages
+  - key: service_cidr
+    type: string
+    value: 10.96.0.0/16
+    description: Service 网段
+    group: k8s
+  - key: pod_cidr
+    type: string
+    value: 10.244.0.0/16
+    description: Pod 网段
+    group: k8s
+  - key: clusterdns
+    type: string
+    value: 10.96.0.10
+    description: 集群 DNS 地址
+    group: k8s
+  - key: calico_ipipmode
+    type: string
+    value: Never
+    description: Calico IPIP 模式
+    group: calico
+  - key: calico_vxlanmode
+    type: string
+    value: Always
+    description: Calico VXLAN 模式
+    group: calico
+machineGroups:
+  - name: k8s_master0
+    description: K8s首台控制平面主节点，集群初始化入口节点
+  - name: k8s_master
+    description: K8s所有控制平面Master节点分组，建议为奇数个
+  - name: k8s_cluster
+    description: k8s集群全部节点统一分组，包含所有Master、ETCD、Worker节点
+  - name: k8s_etcd
+    description: 独立ETCD集群节点分组，仅用于部署高可用etcd数据库，建议为奇数个
+stages:
+  - name: 集群资源暴力清空
+    description: 快速清空集群资源，确保etcd数据干净，防止后续部署冲突
+    machineGroup: k8s_master0
+    tasks:
+      - ref: 1
+        name: '[暴力清空] 删除所有非系统命名空间'
+        module: shell
+        order: 1
+        params: '{"command":"kubectl delete ns --all --force --grace-period=0 || true"}'
+      - ref: 2
+        name: '[暴力清空] 强制删除所有残留节点'
+        module: shell
+        order: 2
+        params: '{"command":"kubectl delete nodes --all --force --grace-period=0 || true"}'
+      - ref: 3
+        name: '[暴力清空] 删除所有残留PV/PVC'
+        module: shell
+        order: 3
+        params: '{"command":"kubectl delete pv,pvc --all --force --grace-period=0 || true"}'
+  - name: 控制平面组件销毁
+    description: 停止并删除所有Kubernetes控制平面组件，包括kube-apiserver, kube-controller-manager, kube-scheduler
+    machineGroup: k8s_master
+    tasks:
+      - ref: 1
+        name: '[控制平面] 停止kube-apiserver服务'
+        module: systemd
+        order: 1
+        params: '{"name":"kube-apiserver","action":"stop"}'
+      - ref: 2
+        name: '[控制平面] 禁用kube-apiserver开机自启'
+        module: systemd
+        order: 2
+        params: '{"name":"kube-apiserver","action":"disable"}'
+      - ref: 3
+        name: '[控制平面] 停止kube-controller-manager服务'
+        module: systemd
+        order: 3
+        params: '{"name":"kube-controller-manager","action":"stop"}'
+      - ref: 4
+        name: '[控制平面] 禁用kube-controller-manager开机自启'
+        module: systemd
+        order: 4
+        params: '{"name":"kube-controller-manager","action":"disable"}'
+      - ref: 5
+        name: '[控制平面] 停止kube-scheduler服务'
+        module: systemd
+        order: 5
+        params: '{"name":"kube-scheduler","action":"stop"}'
+      - ref: 6
+        name: '[控制平面] 禁用kube-scheduler开机自启'
+        module: systemd
+        order: 6
+        params: '{"name":"kube-scheduler","action":"disable"}'
+      - ref: 7
+        name: '[控制平面] 删除kubernetes-server二进制文件'
+        module: file
+        order: 7
+        params: '{"path":"/usr/local/bin/kube-apiserver","action":"delete"}'
+      - ref: 8
+        name: '[控制平面] 删除kubernetes-server二进制文件'
+        module: file
+        order: 8
+        params: '{"path":"/usr/local/bin/kube-controller-manager","action":"delete"}'
+      - ref: 9
+        name: '[控制平面] 删除kubernetes-server二进制文件'
+        module: file
+        order: 9
+        params: '{"path":"/usr/local/bin/kube-scheduler","action":"delete"}'
+      - ref: 10
+        name: '[控制平面] 删除kubernetes-server二进制文件'
+        module: file
+        order: 10
+        params: '{"path":"/usr/local/bin/kubectl","action":"delete"}'
+      - ref: 11
+        name: '[控制平面] 删除控制平面systemd服务文件'
+        module: file
+        order: 11
+        params: '{"path":"/etc/systemd/system/kube-apiserver.service","action":"delete"}'
+      - ref: 12
+        name: '[控制平面] 删除控制平面systemd服务文件'
+        module: file
+        order: 12
+        params: '{"path":"/etc/systemd/system/kube-controller-manager.service","action":"delete"}'
+      - ref: 13
+        name: '[控制平面] 删除控制平面systemd服务文件'
+        module: file
+        order: 13
+        params: '{"path":"/etc/systemd/system/kube-scheduler.service","action":"delete"}'
+      - ref: 14
+        name: '[控制平面] 重新加载systemd配置'
+        module: systemd
+        order: 14
+        params: '{"name":"","action":"reload"}'
+      - ref: 15
+        name: '[控制平面] 删除控制平面配置文件'
+        module: file
+        order: 15
+        params: '{"path":"/etc/kubernetes/controller-manager.conf","action":"delete"}'
+      - ref: 16
+        name: '[控制平面] 删除控制平面配置文件'
+        module: file
+        order: 16
+        params: '{"path":"/etc/kubernetes/scheduler.conf","action":"delete"}'
+      - ref: 17
+        name: '[控制平面] 删除管理员kubeconfig'
+        module: file
+        order: 17
+        params: '{"path":"/root/.kube/config","action":"delete"}'
+      - ref: 18
+        name: '[控制平面] 删除kubectl补全脚本'
+        module: file
+        order: 18
+        params: '{"path":"/etc/bash_completion.d/kubectl.sh","action":"delete"}'
+      - ref: 19
+        name: '[控制平面] 删除helm补全脚本'
+        module: file
+        order: 19
+        params: '{"path":"/etc/bash_completion.d/helm.sh","action":"delete"}'
+      - ref: 20
+        name: '[控制平面] 验证控制平面组件已停止'
+        module: script
+        order: 20
+        params: '{"script":"#!/bin/bash\nset -e\necho \"验证控制平面组件已停止...\"\nfor svc in kube-apiserver kube-controller-manager kube-scheduler; do\n  if systemctl is-active --quiet \"$svc\"; then\n    echo \"错误: 服务 $svc 仍在运行\"\n    exit 1\n  fi\ndone\necho \"所有控制平面组件已成功停止\""}'
+  - name: 工作节点组件销毁
+    description: 停止并删除所有Kubernetes工作节点组件，包括kubelet, kube-proxy
+    machineGroup: k8s_cluster
+    tasks:
+      - ref: 1
+        name: '[工作节点] 停止kubelet服务'
+        module: systemd
+        order: 1
+        params: '{"name":"kubelet","action":"stop"}'
+      - ref: 2
+        name: '[工作节点] 禁用kubelet开机自启'
+        module: systemd
+        order: 2
+        params: '{"name":"kubelet","action":"disable"}'
+      - ref: 3
+        name: '[工作节点] 停止kube-proxy服务'
+        module: systemd
+        order: 3
+        params: '{"name":"kube-proxy","action":"stop"}'
+      - ref: 4
+        name: '[工作节点] 禁用kube-proxy开机自启'
+        module: systemd
+        order: 4
+        params: '{"name":"kube-proxy","action":"disable"}'
+      - ref: 5
+        name: '[工作节点] 删除kubernetes-node二进制文件'
+        module: file
+        order: 5
+        params: '{"path":"/usr/local/bin/kubelet","action":"delete"}'
+      - ref: 6
+        name: '[工作节点] 删除kubernetes-node二进制文件'
+        module: file
+        order: 6
+        params: '{"path":"/usr/local/bin/kube-proxy","action":"delete"}'
+      - ref: 7
+        name: '[工作节点] 删除kubelet服务文件'
+        module: file
+        order: 7
+        params: '{"path":"/etc/systemd/system/kubelet.service","action":"delete"}'
+      - ref: 8
+        name: '[工作节点] 删除kube-proxy服务文件'
+        module: file
+        order: 8
+        params: '{"path":"/etc/systemd/system/kube-proxy.service","action":"delete"}'
+      - ref: 9
+        name: '[工作节点] 删除kubelet配置目录'
+        module: file
+        order: 9
+        params: '{"path":"/etc/kubernetes/kubelet-conf.yml","action":"delete"}'
+      - ref: 10
+        name: '[工作节点] 删除kube-proxy配置目录'
+        module: file
+        order: 10
+        params: '{"path":"/etc/kubernetes/kube-proxy.yml","action":"delete"}'
+      - ref: 11
+        name: '[工作节点] 删除bootstrap配置文件'
+        module: file
+        order: 11
+        params: '{"path":"/etc/kubernetes/bootstrap-kubelet.conf","action":"delete"}'
+      - ref: 12
+        name: '[工作节点] 删除kube-proxy配置文件'
+        module: file
+        order: 12
+        params: '{"path":"/etc/kubernetes/kube-proxy.conf","action":"delete"}'
+      - ref: 13
+        name: '[工作节点] 重新加载systemd配置'
+        module: systemd
+        order: 13
+        params: '{"name":"","action":"reload"}'
+      - ref: 14
+        name: '[工作节点] 验证工作节点组件已停止'
+        module: script
+        order: 14
+        params: '{"script":"#!/bin/bash\nset -e\necho \"验证工作节点组件已停止...\"\nfor svc in kubelet kube-proxy; do\n  if systemctl is-active --quiet \"$svc\"; then\n    echo \"错误: 服务 $svc 仍在运行\"\n    exit 1\n  fi\ndone\necho \"所有工作节点组件已成功停止\""}'
+  - name: etcd集群销毁
+    description: 停止并删除etcd集群，包括二进制文件、数据目录和配置文件
+    machineGroup: k8s_etcd
+    tasks:
+      - ref: 1
+        name: '[etcd] 停止etcd服务'
+        module: systemd
+        order: 1
+        params: '{"name":"etcd","action":"stop"}'
+      - ref: 2
+        name: '[etcd] 禁用etcd开机自启'
+        module: systemd
+        order: 2
+        params: '{"name":"etcd","action":"disable"}'
+      - ref: 3
+        name: '[etcd] 删除etcd二进制文件'
+        module: file
+        order: 3
+        params: '{"path":"/usr/local/bin/etcd","action":"delete"}'
+      - ref: 4
+        name: '[etcd] 删除etcdctl二进制文件'
+        module: file
+        order: 4
+        params: '{"path":"/usr/local/bin/etcdctl","action":"delete"}'
+      - ref: 5
+        name: '[etcd] 删除etcd服务文件'
+        module: file
+        order: 5
+        params: '{"path":"/etc/systemd/system/etcd.service","action":"delete"}'
+      - ref: 6
+        name: '[etcd] 删除etcd配置目录'
+        module: file
+        order: 6
+        params: '{"path":"/etc/etcd/etcd.yaml","action":"delete"}'
+      - ref: 7
+        name: '[etcd] 删除etcd数据目录'
+        module: file
+        order: 7
+        params: '{"path":"{{ .GlobalVariable.etcd_data }}","action":"delete","force":"true"}'
+      - ref: 8
+        name: '[etcd] 删除etcd证书目录'
+        module: file
+        order: 8
+        params: '{"path":"/etc/kubernetes/pki/etcd","action":"delete","force":"true"}'
+      - ref: 9
+        name: '[etcd] 删除etcd环境变量脚本'
+        module: file
+        order: 9
+        params: '{"path":"/etc/profile.d/etcdctl.sh","action":"delete"}'
+      - ref: 10
+        name: '[etcd] 重新加载systemd配置'
+        module: systemd
+        order: 10
+        params: '{"name":"","action":"reload"}'
+      - ref: 11
+        name: '[etcd] 验证etcd服务已停止'
+        module: script
+        order: 11
+        params: '{"script":"#!/bin/bash\nset -e\necho \"验证etcd服务已停止...\"\nif systemctl is-active --quiet etcd; then\n  echo \"错误: etcd服务仍在运行\"\n  exit 1\nfi\necho \"etcd服务已成功停止\""}'
+  - name: 容器运行时销毁
+    description: 停止并删除Docker容器运行时和cri-dockerd适配层，包括二进制文件、数据目录和配置文件
+    machineGroup: k8s_cluster
+    tasks:
+      - ref: 1
+        name: '[容器运行时] 停止Docker服务'
+        module: systemd
+        order: 1
+        params: '{"name":"docker","action":"stop"}'
+      - ref: 2
+        name: '[容器运行时] 禁用Docker开机自启'
+        module: systemd
+        order: 2
+        params: '{"name":"docker","action":"disable"}'
+      - ref: 3
+        name: '[容器运行时] 停止cri-dockerd服务'
+        module: systemd
+        order: 3
+        params: '{"name":"cri-docker","action":"stop"}'
+      - ref: 4
+        name: '[容器运行时] 禁用cri-dockerd开机自启'
+        module: systemd
+        order: 4
+        params: '{"name":"cri-docker","action":"disable"}'
+      - ref: 5
+        name: '[容器运行时] 删除Docker二进制文件'
+        module: file
+        order: 5
+        params: '{"path":"/usr/local/bin/docker","action":"delete"}'
+      - ref: 6
+        name: '[容器运行时] 删除cri-dockerd二进制文件'
+        module: file
+        order: 6
+        params: '{"path":"/usr/local/bin/cri-dockerd","action":"delete"}'
+      - ref: 7
+        name: '[容器运行时] 删除Docker服务文件'
+        module: file
+        order: 7
+        params: '{"path":"/etc/systemd/system/docker.service","action":"delete"}'
+      - ref: 8
+        name: '[容器运行时] 删除cri-dockerd服务文件'
+        module: file
+        order: 8
+        params: '{"path":"/etc/systemd/system/cri-docker.service","action":"delete"}'
+      - ref: 9
+        name: '[容器运行时] 删除Docker配置目录'
+        module: file
+        order: 9
+        params: '{"path":"/etc/docker/daemon.json","action":"delete"}'
+      - ref: 10
+        name: '[容器运行时] 删除Docker数据目录'
+        module: file
+        order: 10
+        params: '{"path":"{{ .GlobalVariable.docker_data }}","action":"delete","force":"true"}'
+      - ref: 11
+        name: '[容器运行时] 删除registry数据目录'
+        module: file
+        order: 11
+        params: '{"path":"{{ .GlobalVariable.docker_registry_data }}","action":"delete","force":"true"}'
+      - ref: 12
+        name: '[容器运行时] 重新加载systemd配置'
+        module: systemd
+        order: 12
+        params: '{"name":"","action":"reload"}'
+      - ref: 13
+        name: '[容器运行时] 验证Docker服务已停止'
+        module: script
+        order: 13
+        params: '{"script":"#!/bin/bash\nset -e\necho \"验证Docker服务已停止...\"\nfor svc in docker cri-dockerd; do\n  if systemctl is-active --quiet \"$svc\"; then\n    echo \"错误: 服务 $svc 仍在运行\"\n    exit 1\n  fi\ndone\necho \"所有容器运行时服务已成功停止\""}'
+  - name: 网络与系统清理
+    description: 清理网络配置、CNI插件、iptables规则和系统工具
+    machineGroup: k8s_cluster
+    tasks:
+      - ref: 1
+        name: '[网络清理] 清理iptables规则'
+        module: shell
+        order: 1
+        params: '{"command":"iptables -F && iptables -t nat -F && iptables -t mangle -F && iptables -X"}'
+      - ref: 2
+        name: '[网络清理] 清理IPVS规则'
+        module: shell
+        order: 2
+        params: '{"command":"ipvsadm --clear || true"}'
+      - ref: 3
+        name: '[网络清理] 删除CNI配置目录'
+        module: file
+        order: 3
+        params: '{"path":"/etc/cni/net.d","action":"delete","force":"true"}'
+      - ref: 4
+        name: '[网络清理] 删除CNI数据目录'
+        module: file
+        order: 4
+        params: '{"path":"/var/lib/cni","action":"delete","force":"true"}'
+      - ref: 5
+        name: '[网络清理] 删除NetworkManager Calico配置（非Ubuntu系统）'
+        module: file
+        order: 5
+        params: '{"path":"/etc/NetworkManager/conf.d/calico.conf","action":"delete"}'
+        when: '{{ .Machine.os_name }} !contains ubuntu'
+      - ref: 6
+        name: '[系统清理] 删除时间同步服务配置'
+        module: file
+        order: 6
+        params: '{"path":"/etc/chrony.conf","action":"delete"}'
+      - ref: 7
+        name: '[系统清理] 删除内核参数配置'
+        module: file
+        order: 7
+        params: '{"path":"/etc/sysctl.conf","action":"delete"}'
+      - ref: 8
+        name: '[系统清理] 删除IPVS模块配置'
+        module: file
+        order: 8
+        params: '{"path":"/etc/modules-load.d/ipvs.conf","action":"delete"}'
+      - ref: 9
+        name: '[系统清理] 删除资源限制配置'
+        module: file
+        order: 9
+        params: '{"path":"/etc/security/limits.conf","action":"delete"}'
+      - ref: 10
+        name: '[系统清理] 重新加载系统配置'
+        module: systemd
+        order: 10
+        params: '{"name":"","action":"reload"}'
+      - ref: 11
+        name: '[系统清理] 验证系统清理完成'
+        module: script
+        order: 11
+        params: '{"script":"#!/bin/bash\nset -e\necho \"验证系统清理完成...\"\nif [[ -d \"/etc/cni/net.d\" ]]; then\n  echo \"错误: CNI配置目录仍然存在\"\n  exit 1\nfi\nif [[ -d \"/var/lib/cni\" ]]; then\n  echo \"错误: CNI数据目录仍然存在\"\n  exit 1\nfi\necho \"系统清理已完成\""}'
+  - name: 数据与证书清理
+    description: 删除Kubernetes数据目录、证书文件和配置文件
+    machineGroup: k8s_cluster
+    tasks:
+      - ref: 1
+        name: '[数据清理] 删除kubelet数据目录'
+        module: file
+        order: 1
+        params: '{"path":"{{ .GlobalVariable.kubelet_data }}","action":"delete","force":"true"}'
+      - ref: 2
+        name: '[证书清理] 删除PKI证书目录'
+        module: file
+        order: 2
+        params: '{"path":"/etc/kubernetes/pki","action":"delete","force":"true"}'
+      - ref: 3
+        name: '[证书清理] 删除kubeconfig配置目录'
+        module: file
+        order: 3
+        params: '{"path":"/etc/kubernetes","action":"delete","force":"true"}'
+      - ref: 4
+        name: '[数据清理] 验证数据清理完成'
+        module: script
+        order: 4
+        params: '{"script":"#!/bin/bash\nset -e\necho \"验证数据清理完成...\"\nif [[ -d \"/etc/kubernetes\" ]]; then\n  echo \"错误: Kubernetes配置目录仍然存在\"\n  exit 1\nfi\nif [[ -d \"{{ .GlobalVariable.kubelet_data }}\" ]]; then\n  echo \"错误: kubelet数据目录仍然存在\"\n  exit 1\nfi\necho \"数据清理已完成\""}'
+  - name: 销毁验证与确认
+    description: 验证所有组件已成功销毁，环境已恢复到干净状态
+    machineGroup: k8s_cluster
+    tasks:
+      - ref: 1
+        name: '[验证] 检查Kubernetes服务状态'
+        module: script
+        order: 1
+        params: '{"script":"#!/bin/bash\nset -e\necho \"检查Kubernetes服务状态...\"\nservices=(\"kubelet\" \"kube-proxy\" \"kube-apiserver\" \"kube-controller-manager\" \"kube-scheduler\" \"etcd\" \"docker\" \"cri-dockerd\")\nfor svc in \"${services[@]}\"; do\n  if systemctl is-enabled --quiet \"$svc\" 2>/dev/null; then\n    echo \"错误: 服务 $svc 仍然设置为开机自启\"\n    exit 1\n  fi\n  if systemctl is-active --quiet \"$svc\" 2>/dev/null; then\n    echo \"错误: 服务 $svc 仍在运行\"\n    exit 1\n  fi\ndone\necho \"所有Kubernetes相关服务已停止并禁用\""}'
+      - ref: 2
+        name: '[验证] 检查Kubernetes目录和文件'
+        module: script
+        order: 2
+        params: '{"script":"#!/bin/bash\nset -e\necho \"检查Kubernetes目录和文件...\"\ndirectories=(\"/etc/kubernetes\" \"/var/lib/kubelet\" \"/var/lib/etcd\" \"/etc/cni/net.d\" \"/var/lib/cni\")\nfor dir in \"${directories[@]}\"; do\n  if [[ -d \"$dir\" ]]; then\n    echo \"错误: 目录 $dir 仍然存在\"\n    exit 1\n  fi\ndone\necho \"所有Kubernetes目录和文件已清理\""}'
+      - ref: 3
+        name: '[验证] 检查网络规则'
+        module: script
+        order: 3
+        params: '{"script":"#!/bin/bash\nset -e\necho \"检查网络规则...\"\nif [[ -n \"$(iptables -L -n)\" ]]; then\n  echo \"警告: iptables规则仍然存在，可能需要手动清理\"\n  # 不退出，只是警告\nfi\nif command -v ipvsadm &> /dev/null && [[ -n \"$(ipvsadm -L -n)\" ]]; then\n  echo \"警告: IPVS规则仍然存在，可能需要手动清理\"\n  # 不退出，只是警告\nfi\necho \"网络规则检查完成\""}'
+      - ref: 4
+        name: '[验证] 检查系统配置'
+        module: script
+        order: 4
+        params: '{"script":"#!/bin/bash\nset -e\necho \"检查系统配置...\"\nif [[ -f \"/etc/kubernetes/manifests\" ]]; then\n  echo \"错误: Kubernetes manifests目录仍然存在\"\n  exit 1\nfi\nif [[ -f \"$HOME/.kube/config\" ]]; then\n  echo \"错误: kubeconfig文件仍然存在\"\n  exit 1\nfi\necho \"系统配置检查完成\""}'
+      - ref: 5
+        name: '[验证] 最终验证报告'
+        module: script
+        order: 5
+        params: '{"script":"#!/bin/bash\nset -e\necho \"========================================\"\necho \"Kubernetes集群销毁验证报告\"\necho \"========================================\"\necho \"✅ 所有Kubernetes服务已停止并禁用\"\necho \"✅ 所有Kubernetes目录和文件已清理\"\necho \"✅ 网络规则已清理（部分可能需要手动清理）\"\necho \"✅ 系统配置已恢复\"\necho \"========================================\"\necho \"集群销毁已完成，环境已恢复到干净状态\"\necho \"========================================\""}'
+workflows:
+  - name: k8s-destroy-solution
+    stageGroups:
+      - name: 阶段组 1
+        order: 1
+        mode: sequential
+        stages:
+          - name: 集群资源暴力清空
+            description: 快速清空集群资源，确保etcd数据干净，防止后续部署冲突
+            order: 1
+            machineGroup: k8s_master0
+            tasks:
+              - ref: 1
+                name: '[暴力清空] 删除所有非系统命名空间'
+                module: shell
+                params: '{"command":"kubectl delete ns --all --force --grace-period=0 || true"}'
+                order: 1
+              - ref: 2
+                name: '[暴力清空] 强制删除所有残留节点'
+                module: shell
+                params: '{"command":"kubectl delete nodes --all --force --grace-period=0 || true"}'
+                order: 2
+              - ref: 3
+                name: '[暴力清空] 删除所有残留PV/PVC'
+                module: shell
+                params: '{"command":"kubectl delete pv,pvc --all --force --grace-period=0 || true"}'
+                order: 3
+          - name: 控制平面组件销毁
+            description: 停止并删除所有Kubernetes控制平面组件，包括kube-apiserver, kube-controller-manager, kube-scheduler
+            order: 2
+            machineGroup: k8s_master
+            tasks:
+              - ref: 4
+                name: '[控制平面] 停止kube-apiserver服务'
+                module: systemd
+                params: '{"name":"kube-apiserver","action":"stop"}'
+                order: 1
+              - ref: 5
+                name: '[控制平面] 禁用kube-apiserver开机自启'
+                module: systemd
+                params: '{"name":"kube-apiserver","action":"disable"}'
+                order: 2
+              - ref: 6
+                name: '[控制平面] 停止kube-controller-manager服务'
+                module: systemd
+                params: '{"name":"kube-controller-manager","action":"stop"}'
+                order: 3
+              - ref: 7
+                name: '[控制平面] 禁用kube-controller-manager开机自启'
+                module: systemd
+                params: '{"name":"kube-controller-manager","action":"disable"}'
+                order: 4
+              - ref: 8
+                name: '[控制平面] 停止kube-scheduler服务'
+                module: systemd
+                params: '{"name":"kube-scheduler","action":"stop"}'
+                order: 5
+              - ref: 9
+                name: '[控制平面] 禁用kube-scheduler开机自启'
+                module: systemd
+                params: '{"name":"kube-scheduler","action":"disable"}'
+                order: 6
+              - ref: 10
+                name: '[控制平面] 删除kubernetes-server二进制文件'
+                module: file
+                params: '{"path":"/usr/local/bin/kube-apiserver","action":"delete"}'
+                order: 7
+              - ref: 11
+                name: '[控制平面] 删除kubernetes-server二进制文件'
+                module: file
+                params: '{"path":"/usr/local/bin/kube-controller-manager","action":"delete"}'
+                order: 8
+              - ref: 12
+                name: '[控制平面] 删除kubernetes-server二进制文件'
+                module: file
+                params: '{"path":"/usr/local/bin/kube-scheduler","action":"delete"}'
+                order: 9
+              - ref: 13
+                name: '[控制平面] 删除kubernetes-server二进制文件'
+                module: file
+                params: '{"path":"/usr/local/bin/kubectl","action":"delete"}'
+                order: 10
+              - ref: 14
+                name: '[控制平面] 删除控制平面systemd服务文件'
+                module: file
+                params: '{"path":"/etc/systemd/system/kube-apiserver.service","action":"delete"}'
+                order: 11
+              - ref: 15
+                name: '[控制平面] 删除控制平面systemd服务文件'
+                module: file
+                params: '{"path":"/etc/systemd/system/kube-controller-manager.service","action":"delete"}'
+                order: 12
+              - ref: 16
+                name: '[控制平面] 删除控制平面systemd服务文件'
+                module: file
+                params: '{"path":"/etc/systemd/system/kube-scheduler.service","action":"delete"}'
+                order: 13
+              - ref: 17
+                name: '[控制平面] 重新加载systemd配置'
+                module: systemd
+                params: '{"name":"","action":"reload"}'
+                order: 14
+              - ref: 18
+                name: '[控制平面] 删除控制平面配置文件'
+                module: file
+                params: '{"path":"/etc/kubernetes/controller-manager.conf","action":"delete"}'
+                order: 15
+              - ref: 19
+                name: '[控制平面] 删除控制平面配置文件'
+                module: file
+                params: '{"path":"/etc/kubernetes/scheduler.conf","action":"delete"}'
+                order: 16
+              - ref: 20
+                name: '[控制平面] 删除管理员kubeconfig'
+                module: file
+                params: '{"path":"/root/.kube/config","action":"delete"}'
+                order: 17
+              - ref: 21
+                name: '[控制平面] 删除kubectl补全脚本'
+                module: file
+                params: '{"path":"/etc/bash_completion.d/kubectl.sh","action":"delete"}'
+                order: 18
+              - ref: 22
+                name: '[控制平面] 删除helm补全脚本'
+                module: file
+                params: '{"path":"/etc/bash_completion.d/helm.sh","action":"delete"}'
+                order: 19
+              - ref: 23
+                name: '[控制平面] 验证控制平面组件已停止'
+                module: script
+                params: '{"script":"#!/bin/bash\nset -e\necho \"验证控制平面组件已停止...\"\nfor svc in kube-apiserver kube-controller-manager kube-scheduler; do\n  if systemctl is-active --quiet \"$svc\"; then\n    echo \"错误: 服务 $svc 仍在运行\"\n    exit 1\n  fi\ndone\necho \"所有控制平面组件已成功停止\""}'
+                order: 20
+          - name: 工作节点组件销毁
+            description: 停止并删除所有Kubernetes工作节点组件，包括kubelet, kube-proxy
+            order: 3
+            machineGroup: k8s_cluster
+            tasks:
+              - ref: 24
+                name: '[工作节点] 停止kubelet服务'
+                module: systemd
+                params: '{"name":"kubelet","action":"stop"}'
+                order: 1
+              - ref: 25
+                name: '[工作节点] 禁用kubelet开机自启'
+                module: systemd
+                params: '{"name":"kubelet","action":"disable"}'
+                order: 2
+              - ref: 26
+                name: '[工作节点] 停止kube-proxy服务'
+                module: systemd
+                params: '{"name":"kube-proxy","action":"stop"}'
+                order: 3
+              - ref: 27
+                name: '[工作节点] 禁用kube-proxy开机自启'
+                module: systemd
+                params: '{"name":"kube-proxy","action":"disable"}'
+                order: 4
+              - ref: 28
+                name: '[工作节点] 删除kubernetes-node二进制文件'
+                module: file
+                params: '{"path":"/usr/local/bin/kubelet","action":"delete"}'
+                order: 5
+              - ref: 29
+                name: '[工作节点] 删除kubernetes-node二进制文件'
+                module: file
+                params: '{"path":"/usr/local/bin/kube-proxy","action":"delete"}'
+                order: 6
+              - ref: 30
+                name: '[工作节点] 删除kubelet服务文件'
+                module: file
+                params: '{"path":"/etc/systemd/system/kubelet.service","action":"delete"}'
+                order: 7
+              - ref: 31
+                name: '[工作节点] 删除kube-proxy服务文件'
+                module: file
+                params: '{"path":"/etc/systemd/system/kube-proxy.service","action":"delete"}'
+                order: 8
+              - ref: 32
+                name: '[工作节点] 删除kubelet配置目录'
+                module: file
+                params: '{"path":"/etc/kubernetes/kubelet-conf.yml","action":"delete"}'
+                order: 9
+              - ref: 33
+                name: '[工作节点] 删除kube-proxy配置目录'
+                module: file
+                params: '{"path":"/etc/kubernetes/kube-proxy.yml","action":"delete"}'
+                order: 10
+              - ref: 34
+                name: '[工作节点] 删除bootstrap配置文件'
+                module: file
+                params: '{"path":"/etc/kubernetes/bootstrap-kubelet.conf","action":"delete"}'
+                order: 11
+              - ref: 35
+                name: '[工作节点] 删除kube-proxy配置文件'
+                module: file
+                params: '{"path":"/etc/kubernetes/kube-proxy.conf","action":"delete"}'
+                order: 12
+              - ref: 36
+                name: '[工作节点] 重新加载systemd配置'
+                module: systemd
+                params: '{"name":"","action":"reload"}'
+                order: 13
+              - ref: 37
+                name: '[工作节点] 验证工作节点组件已停止'
+                module: script
+                params: '{"script":"#!/bin/bash\nset -e\necho \"验证工作节点组件已停止...\"\nfor svc in kubelet kube-proxy; do\n  if systemctl is-active --quiet \"$svc\"; then\n    echo \"错误: 服务 $svc 仍在运行\"\n    exit 1\n  fi\ndone\necho \"所有工作节点组件已成功停止\""}'
+                order: 14
+      - name: 阶段组 2
+        order: 2
+        mode: sequential
+        stages:
+          - name: etcd集群销毁
+            description: 停止并删除etcd集群，包括二进制文件、数据目录和配置文件
+            order: 1
+            machineGroup: k8s_etcd
+            tasks:
+              - ref: 38
+                name: '[etcd] 停止etcd服务'
+                module: systemd
+                params: '{"name":"etcd","action":"stop"}'
+                order: 1
+              - ref: 39
+                name: '[etcd] 禁用etcd开机自启'
+                module: systemd
+                params: '{"name":"etcd","action":"disable"}'
+                order: 2
+              - ref: 40
+                name: '[etcd] 删除etcd二进制文件'
+                module: file
+                params: '{"path":"/usr/local/bin/etcd","action":"delete"}'
+                order: 3
+              - ref: 41
+                name: '[etcd] 删除etcdctl二进制文件'
+                module: file
+                params: '{"path":"/usr/local/bin/etcdctl","action":"delete"}'
+                order: 4
+              - ref: 42
+                name: '[etcd] 删除etcd服务文件'
+                module: file
+                params: '{"path":"/etc/systemd/system/etcd.service","action":"delete"}'
+                order: 5
+              - ref: 43
+                name: '[etcd] 删除etcd配置目录'
+                module: file
+                params: '{"path":"/etc/etcd/etcd.yaml","action":"delete"}'
+                order: 6
+              - ref: 44
+                name: '[etcd] 删除etcd数据目录'
+                module: file
+                params: '{"path":"{{ .GlobalVariable.etcd_data }}","action":"delete","force":"true"}'
+                order: 7
+              - ref: 45
+                name: '[etcd] 删除etcd证书目录'
+                module: file
+                params: '{"path":"/etc/kubernetes/pki/etcd","action":"delete","force":"true"}'
+                order: 8
+              - ref: 46
+                name: '[etcd] 删除etcd环境变量脚本'
+                module: file
+                params: '{"path":"/etc/profile.d/etcdctl.sh","action":"delete"}'
+                order: 9
+              - ref: 47
+                name: '[etcd] 重新加载systemd配置'
+                module: systemd
+                params: '{"name":"","action":"reload"}'
+                order: 10
+              - ref: 48
+                name: '[etcd] 验证etcd服务已停止'
+                module: script
+                params: '{"script":"#!/bin/bash\nset -e\necho \"验证etcd服务已停止...\"\nif systemctl is-active --quiet etcd; then\n  echo \"错误: etcd服务仍在运行\"\n  exit 1\nfi\necho \"etcd服务已成功停止\""}'
+                order: 11
+          - name: 容器运行时销毁
+            description: 停止并删除Docker容器运行时和cri-dockerd适配层，包括二进制文件、数据目录和配置文件
+            order: 2
+            machineGroup: k8s_cluster
+            tasks:
+              - ref: 49
+                name: '[容器运行时] 停止Docker服务'
+                module: systemd
+                params: '{"name":"docker","action":"stop"}'
+                order: 1
+              - ref: 50
+                name: '[容器运行时] 禁用Docker开机自启'
+                module: systemd
+                params: '{"name":"docker","action":"disable"}'
+                order: 2
+              - ref: 51
+                name: '[容器运行时] 停止cri-dockerd服务'
+                module: systemd
+                params: '{"name":"cri-docker","action":"stop"}'
+                order: 3
+              - ref: 52
+                name: '[容器运行时] 禁用cri-dockerd开机自启'
+                module: systemd
+                params: '{"name":"cri-docker","action":"disable"}'
+                order: 4
+              - ref: 53
+                name: '[容器运行时] 删除Docker二进制文件'
+                module: file
+                params: '{"path":"/usr/local/bin/docker","action":"delete"}'
+                order: 5
+              - ref: 54
+                name: '[容器运行时] 删除cri-dockerd二进制文件'
+                module: file
+                params: '{"path":"/usr/local/bin/cri-dockerd","action":"delete"}'
+                order: 6
+              - ref: 55
+                name: '[容器运行时] 删除Docker服务文件'
+                module: file
+                params: '{"path":"/etc/systemd/system/docker.service","action":"delete"}'
+                order: 7
+              - ref: 56
+                name: '[容器运行时] 删除cri-dockerd服务文件'
+                module: file
+                params: '{"path":"/etc/systemd/system/cri-docker.service","action":"delete"}'
+                order: 8
+              - ref: 57
+                name: '[容器运行时] 删除Docker配置目录'
+                module: file
+                params: '{"path":"/etc/docker/daemon.json","action":"delete"}'
+                order: 9
+              - ref: 58
+                name: '[容器运行时] 删除Docker数据目录'
+                module: file
+                params: '{"path":"{{ .GlobalVariable.docker_data }}","action":"delete","force":"true"}'
+                order: 10
+              - ref: 59
+                name: '[容器运行时] 删除registry数据目录'
+                module: file
+                params: '{"path":"{{ .GlobalVariable.docker_registry_data }}","action":"delete","force":"true"}'
+                order: 11
+              - ref: 60
+                name: '[容器运行时] 重新加载systemd配置'
+                module: systemd
+                params: '{"name":"","action":"reload"}'
+                order: 12
+              - ref: 61
+                name: '[容器运行时] 验证Docker服务已停止'
+                module: script
+                params: '{"script":"#!/bin/bash\nset -e\necho \"验证Docker服务已停止...\"\nfor svc in docker cri-dockerd; do\n  if systemctl is-active --quiet \"$svc\"; then\n    echo \"错误: 服务 $svc 仍在运行\"\n    exit 1\n  fi\ndone\necho \"所有容器运行时服务已成功停止\""}'
+                order: 13
+      - name: 阶段组 3
+        order: 3
+        mode: sequential
+        stages:
+          - name: 网络与系统清理
+            description: 清理网络配置、CNI插件、iptables规则和系统工具
+            order: 1
+            machineGroup: k8s_cluster
+            tasks:
+              - ref: 62
+                name: '[网络清理] 清理iptables规则'
+                module: shell
+                params: '{"command":"iptables -F && iptables -t nat -F && iptables -t mangle -F && iptables -X"}'
+                order: 1
+              - ref: 63
+                name: '[网络清理] 清理IPVS规则'
+                module: shell
+                params: '{"command":"ipvsadm --clear || true"}'
+                order: 2
+              - ref: 64
+                name: '[网络清理] 删除CNI配置目录'
+                module: file
+                params: '{"path":"/etc/cni/net.d","action":"delete","force":"true"}'
+                order: 3
+              - ref: 65
+                name: '[网络清理] 删除CNI数据目录'
+                module: file
+                params: '{"path":"/var/lib/cni","action":"delete","force":"true"}'
+                order: 4
+              - ref: 66
+                name: '[网络清理] 删除NetworkManager Calico配置（非Ubuntu系统）'
+                module: file
+                params: '{"path":"/etc/NetworkManager/conf.d/calico.conf","action":"delete"}'
+                order: 5
+                when: '{{ .Machine.os_name }} !contains ubuntu'
+              - ref: 67
+                name: '[系统清理] 删除时间同步服务配置'
+                module: file
+                params: '{"path":"/etc/chrony.conf","action":"delete"}'
+                order: 6
+              - ref: 68
+                name: '[系统清理] 删除内核参数配置'
+                module: file
+                params: '{"path":"/etc/sysctl.conf","action":"delete"}'
+                order: 7
+              - ref: 69
+                name: '[系统清理] 删除IPVS模块配置'
+                module: file
+                params: '{"path":"/etc/modules-load.d/ipvs.conf","action":"delete"}'
+                order: 8
+              - ref: 70
+                name: '[系统清理] 删除资源限制配置'
+                module: file
+                params: '{"path":"/etc/security/limits.conf","action":"delete"}'
+                order: 9
+              - ref: 71
+                name: '[系统清理] 重新加载系统配置'
+                module: systemd
+                params: '{"name":"","action":"reload"}'
+                order: 10
+              - ref: 72
+                name: '[系统清理] 验证系统清理完成'
+                module: script
+                params: '{"script":"#!/bin/bash\nset -e\necho \"验证系统清理完成...\"\nif [[ -d \"/etc/cni/net.d\" ]]; then\n  echo \"错误: CNI配置目录仍然存在\"\n  exit 1\nfi\nif [[ -d \"/var/lib/cni\" ]]; then\n  echo \"错误: CNI数据目录仍然存在\"\n  exit 1\nfi\necho \"系统清理已完成\""}'
+                order: 11
+          - name: 数据与证书清理
+            description: 删除Kubernetes数据目录、证书文件和配置文件
+            order: 2
+            machineGroup: k8s_cluster
+            tasks:
+              - ref: 73
+                name: '[数据清理] 删除kubelet数据目录'
+                module: file
+                params: '{"path":"{{ .GlobalVariable.kubelet_data }}","action":"delete","force":"true"}'
+                order: 1
+              - ref: 74
+                name: '[证书清理] 删除PKI证书目录'
+                module: file
+                params: '{"path":"/etc/kubernetes/pki","action":"delete","force":"true"}'
+                order: 2
+              - ref: 75
+                name: '[证书清理] 删除kubeconfig配置目录'
+                module: file
+                params: '{"path":"/etc/kubernetes","action":"delete","force":"true"}'
+                order: 3
+              - ref: 76
+                name: '[数据清理] 验证数据清理完成'
+                module: script
+                params: '{"script":"#!/bin/bash\nset -e\necho \"验证数据清理完成...\"\nif [[ -d \"/etc/kubernetes\" ]]; then\n  echo \"错误: Kubernetes配置目录仍然存在\"\n  exit 1\nfi\nif [[ -d \"{{ .GlobalVariable.kubelet_data }}\" ]]; then\n  echo \"错误: kubelet数据目录仍然存在\"\n  exit 1\nfi\necho \"数据清理已完成\""}'
+                order: 4
+      - name: 阶段组 4
+        order: 4
+        mode: sequential
+        stages:
+          - name: 销毁验证与确认
+            description: 验证所有组件已成功销毁，环境已恢复到干净状态
+            order: 1
+            machineGroup: k8s_cluster
+            tasks:
+              - ref: 77
+                name: '[验证] 检查Kubernetes服务状态'
+                module: script
+                params: '{"script":"#!/bin/bash\nset -e\necho \"检查Kubernetes服务状态...\"\nservices=(\"kubelet\" \"kube-proxy\" \"kube-apiserver\" \"kube-controller-manager\" \"kube-scheduler\" \"etcd\" \"docker\" \"cri-dockerd\")\nfor svc in \"${services[@]}\"; do\n  if systemctl is-enabled --quiet \"$svc\" 2>/dev/null; then\n    echo \"错误: 服务 $svc 仍然设置为开机自启\"\n    exit 1\n  fi\n  if systemctl is-active --quiet \"$svc\" 2>/dev/null; then\n    echo \"错误: 服务 $svc 仍在运行\"\n    exit 1\n  fi\ndone\necho \"所有Kubernetes相关服务已停止并禁用\""}'
+                order: 1
+              - ref: 78
+                name: '[验证] 检查Kubernetes目录和文件'
+                module: script
+                params: '{"script":"#!/bin/bash\nset -e\necho \"检查Kubernetes目录和文件...\"\ndirectories=(\"/etc/kubernetes\" \"/var/lib/kubelet\" \"/var/lib/etcd\" \"/etc/cni/net.d\" \"/var/lib/cni\")\nfor dir in \"${directories[@]}\"; do\n  if [[ -d \"$dir\" ]]; then\n    echo \"错误: 目录 $dir 仍然存在\"\n    exit 1\n  fi\ndone\necho \"所有Kubernetes目录和文件已清理\""}'
+                order: 2
+              - ref: 79
+                name: '[验证] 检查网络规则'
+                module: script
+                params: '{"script":"#!/bin/bash\nset -e\necho \"检查网络规则...\"\nif [[ -n \"$(iptables -L -n)\" ]]; then\n  echo \"警告: iptables规则仍然存在，可能需要手动清理\"\n  # 不退出，只是警告\nfi\nif command -v ipvsadm &> /dev/null && [[ -n \"$(ipvsadm -L -n)\" ]]; then\n  echo \"警告: IPVS规则仍然存在，可能需要手动清理\"\n  # 不退出，只是警告\nfi\necho \"网络规则检查完成\""}'
+                order: 3
+              - ref: 80
+                name: '[验证] 检查系统配置'
+                module: script
+                params: '{"script":"#!/bin/bash\nset -e\necho \"检查系统配置...\"\nif [[ -f \"/etc/kubernetes/manifests\" ]]; then\n  echo \"错误: Kubernetes manifests目录仍然存在\"\n  exit 1\nfi\nif [[ -f \"$HOME/.kube/config\" ]]; then\n  echo \"错误: kubeconfig文件仍然存在\"\n  exit 1\nfi\necho \"系统配置检查完成\""}'
+                order: 4
+              - ref: 81
+                name: '[验证] 最终验证报告'
+                module: script
+                params: '{"script":"#!/bin/bash\nset -e\necho \"========================================\"\necho \"Kubernetes集群销毁验证报告\"\necho \"========================================\"\necho \"✅ 所有Kubernetes服务已停止并禁用\"\necho \"✅ 所有Kubernetes目录和文件已清理\"\necho \"✅ 网络规则已清理（部分可能需要手动清理）\"\necho \"✅ 系统配置已恢复\"\necho \"========================================\"\necho \"集群销毁已完成，环境已恢复到干净状态\"\necho \"========================================\""}'
+                order: 5

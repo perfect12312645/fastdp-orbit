@@ -1,0 +1,141 @@
+syntax = "proto3";
+
+package agent;
+
+option go_package = "fastdp-orbit/backend/proto/agent";
+
+// AgentService 是Agent端实现的服务，供Server端调用
+service AgentService {
+    // Exec 执行单个模块任务（类Ansible）
+    rpc Exec(ExecRequest) returns (ExecResponse);
+    
+    // BatchExec 批量执行模块任务（流式返回结果）
+    rpc BatchExec(BatchExecRequest) returns (stream ExecResponse);
+    
+    // GetSystemInfo 获取系统信息
+    rpc GetSystemInfo(SystemInfoRequest) returns (SystemInfoResponse);
+}
+
+// ==================== 执行命令 ====================
+
+// ExecRequest 单个执行请求（对应Playbook中的一个task）
+message ExecRequest {
+    string machine_id = 1;        // 目标机器ID（对应Ansible的inventory主机）
+    string module = 2;            // 模块名（如"shell"、"copy"、"file"、"service"）
+    map<string, string> parameters = 3; // 模块参数
+    string task_id = 4;           // 任务唯一ID（批量执行时用于关联响应）
+    int32 timeout = 5;            // 超时时间（秒），0表示不超时
+}
+
+// BatchExecRequest 批量执行请求（对应Playbook的一次运行）
+message BatchExecRequest {
+    string batch_id = 1;          // 批次ID（标识整个Playbook的执行）
+    repeated ExecRequest tasks = 2; // 批量任务列表
+    bool ordered = 3;             // 是否按顺序执行（false表示并发执行）
+}
+
+// ExecResponse 执行响应
+message ExecResponse {
+    string machine_id = 1;        // 目标机器ID（回显，便于关联）
+    string task_id = 2;           // 任务ID（回显，批量执行时关联请求）
+    bool success = 3;             // 执行是否成功（不代表是否有变更）
+    string stdout = 4;            // 标准输出（模块正常输出）
+    bool changed = 5;             // 是否产生变更（幂等性核心：true=有变更，false=无变更）
+    ErrorDetail error = 6;        // 错误详情（success=false时非空）
+    int64 duration_ms = 7;        // 执行耗时（毫秒）
+}
+
+// ErrorDetail 错误详情
+message ErrorDetail {
+    int32 code = 1;               // 错误码（1001=模块不存在，1002=参数错误，1003=执行超时）
+    string message = 2;           // 错误描述
+    string trace = 3;             // 错误堆栈（调试用）
+}
+
+// ==================== 系统信息 ====================
+
+// SystemInfoRequest 系统信息请求
+message SystemInfoRequest {
+    string machine_id = 1;                    // 目标机器ID
+    repeated string info_types = 2;           // 筛选信息类型（为空返回所有）
+}
+
+// SystemInfoResponse 系统信息响应
+message SystemInfoResponse {
+    string machine_id = 1;                    // 目标机器ID（回显）
+    bool success = 2;                         // 是否成功
+    string message = 3;                       // 结果描述（失败时说明原因）
+    SystemEnvInfo env_info = 4;               // 机器环境信息（success为true时有效）
+}
+
+// SystemEnvInfo 机器环境信息详情
+message SystemEnvInfo {
+    string hostname = 1;                      // 主机名
+    string virtualization = 2;                // 虚拟化类型（none/kvm/vmware/docker等）
+    int64 uptime_seconds = 3;                 // 运行时间（秒）
+    SystemInfo os = 4;                        // 操作系统信息
+    CpuInfo cpu = 5;                          // CPU信息
+    MemoryInfo memory = 6;                    // 内存信息
+    repeated DiskInfo disks = 7;              // 磁盘信息（可能多块磁盘）
+    repeated NetworkInfo networks = 8;        // 网卡信息
+    repeated GpuInfo gpus = 9;               // GPU信息
+    string gateway = 10;                      // 默认网关
+    FirewallInfo firewall = 11;               // 防火墙状态
+    SwapInfo swap = 12;                       // Swap信息
+    string timezone = 13;                     // 时区（如"Asia/Shanghai"）
+    string system_time = 14;                  // 系统时间
+    string hardware_time = 15;                // 硬件时间
+}
+
+// SystemInfo 操作系统信息
+message SystemInfo {
+    string name = 1;                          // 系统名称（如"Kylin Linux Advanced Server V10"）
+    string version = 2;                       // 系统版本（如"Halberd"）
+    string kernel = 3;                        // 内核版本（如"4.19.90-89.11.v2401.ky10.x86_64"）
+    string arch = 4;                          // 架构（如"x86_64"）
+}
+
+// CpuInfo CPU信息
+message CpuInfo {
+    string model = 1;                         // CPU型号（如"Intel(R) Xeon(R) CPU E5-2670 v3 @ 2.30GHz"）
+    int32 cores = 2;                          // CPU核心数
+}
+
+// MemoryInfo 内存信息
+message MemoryInfo {
+    int64 total_kb = 1;                       // 总容量（kB）
+}
+
+// DiskInfo 磁盘信息
+message DiskInfo {
+    string device = 1;                        // 设备名（如"/dev/sda"）
+    string type = 2;                          // 设备类型（ssd/hdd/nvme）
+    int64 total_gb = 3;                       // 总容量（GB）
+}
+
+// NetworkInfo 网卡信息
+message NetworkInfo {
+    string name = 1;                          // 网卡名（如"eth0"）
+    string ip = 2;                            // IP地址（如"10.243.240.1/24"，DOWN时为空）
+    string mac = 3;                           // MAC地址
+    int64 speed = 4;                          // 网卡速率（Mbps，DOWN时为0）
+    string status = 5;                        // 状态（up/down）
+}
+
+// GpuInfo GPU信息
+message GpuInfo {
+    string name = 1;                          // GPU名称（如"NVIDIA A100-SXM4-40GB"）
+    int32 count = 2;                          // 数量
+    string driver_version = 3;                // 驱动版本（如"535.129.03"，未安装驱动时为空）
+}
+
+// FirewallInfo 防火墙状态
+message FirewallInfo {
+    string status = 1;                        // 状态（active/inactive）
+    string enabled = 2;                       // 是否开机启动（enabled/disabled）
+}
+
+// SwapInfo Swap信息
+message SwapInfo {
+    int64 total_kb = 1;                       // 总容量（kB）
+}

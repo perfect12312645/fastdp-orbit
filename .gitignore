@@ -1,0 +1,24 @@
+# Go 相关
+backend/bin/
+backend/build/
+backend/static/
+backend/dist/
+backend/tmp/
+backend/*.db
+
+# 前端相关
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/.env*
+
+# 系统、编辑器
+.DS_Store
+.vscode/
+*.log
+tmp/
+.idea
+.codegraph
+.omo
+releases/
+

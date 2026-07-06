@@ -1,0 +1,17 @@
+[Unit]
+Description=Orbit Server service
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/fastdp-orbit
+ExecStart=/opt/fastdp-orbit/orbit-server --config /etc/fastdp-orbit/server.toml
+Restart=on-failure
+RestartSec=3
+StartLimitBurst=5
+StartLimitInterval=60
+
+PrivateTmp=false
+
+[Install]
+WantedBy=multi-user.target
